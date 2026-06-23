@@ -7,7 +7,7 @@ import { useI18n } from '@shell/composables/useI18n';
 import LabeledSelect from '@shell/components/form/LabeledSelect.vue';
 import Banner from '@components/Banner/Banner.vue';
 import { RcSection } from '@components/RcSection';
-import { _CREATE } from '@shell/config/query-params';
+import { _CREATE, _VIEW } from '@shell/config/query-params';
 import merge from 'lodash/merge';
 import debounce from 'lodash/debounce';
 import Networking from './Networking.vue';
@@ -396,6 +396,9 @@ watch([
   () => region.value,
   () => credentialId.value,
 ], async([newRegion, newCredentialId], [oldRegion, oldCredentialId]) => {
+    if(mode.value === _VIEW) {
+      return
+    }
     credentialErrors.value = []
     if(newCredentialId && newCredentialId !== oldCredentialId){
       // need to await cloud cred as subsequent functions depend on it

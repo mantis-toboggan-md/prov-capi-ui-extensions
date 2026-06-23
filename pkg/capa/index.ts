@@ -1,6 +1,7 @@
 import { importTypes } from '@rancher/auto-import';
-import { IExtension } from '@shell/core/types';
+import { IExtension, ModelExtensionConstructor } from '@shell/core/types';
 import { CAPAProvisioner } from './provisioner';
+import { CAPARKE2Cluster } from './model-extension/provisioning.cattle.io.cluster';
 
 // Init the package
 export default function(plugin: IExtension): void {
@@ -17,4 +18,7 @@ export default function(plugin: IExtension): void {
   plugin.metadata.icon = require('./assets/amazoncapa.svg');
   // Register machine config component
   plugin.register('machine-config', CAPAProvisioner.ID, () => import('./machine-config/capa.vue'));
+
+  // Register a model extension for the provisioning model
+  plugin.addModelExtension('provisioning.cattle.io.cluster', CAPARKE2Cluster as unknown as ModelExtensionConstructor);
 }
