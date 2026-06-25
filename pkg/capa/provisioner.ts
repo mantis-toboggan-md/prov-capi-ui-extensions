@@ -11,7 +11,7 @@ export class CAPAProvisioner implements IClusterProvisioner {
   static ID = 'awsmachinetemplate';
 
   constructor(private context: ClusterProvisionerContext) {
-    mapDriver(this.id, 'aws');
+    context.dispatch('plugins/mapDriver', { name: this.id, to: 'aws' }, { root: true });
   }
 
   get id(): string {
