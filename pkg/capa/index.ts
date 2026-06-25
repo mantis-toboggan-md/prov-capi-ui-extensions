@@ -20,5 +20,5 @@ export default function(plugin: IExtension): void {
   plugin.register('machine-config', CAPAProvisioner.ID, () => import('./machine-config/capa.vue'));
 
   // Register a model extension for the provisioning model
-  plugin.addModelExtension('provisioning.cattle.io.cluster', CAPARKE2Cluster as unknown as ModelExtensionConstructor);
+  plugin.addModelExtension('provisioning.cattle.io.cluster', CAPARKE2Cluster as ModelExtensionConstructor);
 }
