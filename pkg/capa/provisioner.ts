@@ -8,13 +8,14 @@ import ClusterConfiguration from './components/ClusterConfiguration.vue';
 import { isProviderEnabled } from '@shell/utils/settings';
 
 export const detailTabs = {
-      machines:     false,
-      logs:         false,
-      registration: false,
-      snapshots:    false,
+      machines:     true,
+      logs:         true,
       related:      true,
+      conditions:   true,
+      snapshots:    true,
+      registration: false,
+      autoscaler:   false,
       events:       false,
-      conditions:   false,
     };
 
 export const PROVIDER = 'awsmachinetemplate'
