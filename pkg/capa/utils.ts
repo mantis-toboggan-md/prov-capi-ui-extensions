@@ -274,6 +274,10 @@ export async function saveMachinePoolConfigs(pools: PoolEntry[], cluster: Cluste
 
     try {
       if (entry.create) {
+        if (!entry.config) {
+          throw new Error(`Missing machine config for pool "${ entry.pool.name }"`);
+        }
+
         if (!entry.config.metadata?.name) {
           entry.config.metadata.generateName = `nc-${ prefixFormatted }-`;
         }
