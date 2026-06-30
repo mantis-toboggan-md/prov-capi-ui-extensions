@@ -153,7 +153,7 @@ export interface PoolEntry {
   create?: boolean;
   update?: boolean;
   pool: MachinePool;
-  config: InfrastructureMachineResource;
+  config: InfrastructureMachineResource | null;
   oldConfig?: InfrastructureMachineResource | null;
 }
 

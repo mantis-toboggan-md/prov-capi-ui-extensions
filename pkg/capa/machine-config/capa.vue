@@ -114,6 +114,7 @@ async function fetchLatestUbuntuAmi(): Promise<string | null> {
       cmd:    'describeImages',
       key:    'Images',
       opt:    {
+        Owners: ['099720109477'], // Canonical
         Filters: [
           { Name: 'name', Values: [namePattern] },
           { Name: 'architecture', Values: ['x86_64'] },
@@ -183,8 +184,8 @@ async function fetchData() {
       }
     }
 
-    if ( !value.value.instanceType ) {
-      value.value['instanceType'] = store.getters['aws/defaultInstanceType'];
+    if ( !spec.value.instanceType ) {
+      spec.value.instanceType = store.getters['aws/defaultInstanceType'];
     }
 
     loadedRegionalFor.value = region.value;
@@ -207,15 +208,15 @@ async function fetchData() {
   }
 }
 
-if (!value.value.instanceMetadataOptions?.httpTokens) {
-  value.value.instanceMetadataOptions = {
-    ...value.value.instanceMetadataOptions,
+if (!spec.value.instanceMetadataOptions?.httpTokens) {
+    spec.value.instanceMetadataOptions = {
+     ...spec.value.instanceMetadataOptions,
     httpTokens: HTTP_TOKENS_VALUES.REQUIRED,
   };
 }
 
-if (!Array.isArray(value.value.additionalVolumes)) {
-  value.value.additionalVolumes = [];
+if (!Array.isArray(spec.value.nonRootVolumes)) {
+   spec.value.nonRootVolumes = [];
 }
 
 watch(credentialId, () => {

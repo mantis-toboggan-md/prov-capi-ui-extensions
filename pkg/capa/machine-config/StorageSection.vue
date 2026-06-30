@@ -45,6 +45,7 @@ const additionalVolumeTypeOptions = computed(() => VOLUME_TYPE_OPTIONS);
         label-key="capa.machineConfig.storage.rootVolume.size.label"
         suffix="GiB"
         class="mr-10"
+        required
         :mode="mode"
       />
       <LabeledSelect

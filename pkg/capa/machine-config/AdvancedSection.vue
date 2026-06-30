@@ -56,7 +56,8 @@ const spotMaxPrice = computed({
     return props.value.spotMarketOptions?.maxPrice;
   },
   set(maxPrice: string | number | null | undefined) {
-    props.value.spotMarketOptions = { ...props.value.spotMarketOptions, maxPrice: !maxPrice ? `${ maxPrice }` : maxPrice };
+    const normalized = (maxPrice === null || maxPrice === undefined || maxPrice === '') ? undefined : String(maxPrice);
+    props.value.spotMarketOptions = { ...props.value.spotMarketOptions, maxPrice: normalized };
   },
 });
 
