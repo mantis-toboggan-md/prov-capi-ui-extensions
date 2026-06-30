@@ -1,9 +1,10 @@
 import { normalizeName } from '@shell/utils/kube';
 import { DEFAULT_WORKSPACE } from '@shell/config/types';
-import { set } from '@shell/utils/object';
+import { set, diff, isEmpty } from '@shell/utils/object';
 import { createDoNotLogError } from '@shell/utils/error';
+import { handleConflict } from '@shell/plugins/dashboard-store/normalize';
 import {
-  AWS_MACHINE_TEMPLATE_SCHEMA, Translator, InfrastructureClusterResource, InfrastructureMachineResource, ClusterValue, MachineConfigSchema, MachinePool, PoolEntry, StoreContext
+  AWS_MACHINE_TEMPLATE_SCHEMA, AWS_CLUSTER_SCHEMA, InfrastructureClusterResource, InfrastructureMachineResource, ClusterValue, MachineConfigSchema, MachinePool, PoolEntry, StoreContext
 } from './types/capa';
 import * as AWS from '@shell/types/aws-sdk';
 import { CAPA } from './labels-annotations';
@@ -63,6 +64,93 @@ function formatErrorMessage(context: StoreContext, key: string, e?: any): string
   const t = context.t || context.$t;
 
   return t ? t(key, { error }) : `${ key }: ${ error }`;
+}
+
+function isConflictError(e: any): boolean {
+  const code = e?.status ?? e?._status ?? e?.code;
+  const message = (e?.message || e?._message || String(e || '')).toLowerCase();
+
+  return code === 409 || code === '409' || message.includes('the object has been modified');
+}
+
+async function saveWithConflictResolution(
+  initial: InfrastructureClusterResource | null | undefined,
+  userValue: InfrastructureClusterResource,
+  context: StoreContext,
+  attempts = 3,
+): Promise<InfrastructureClusterResource> {
+  const type = userValue.type || AWS_CLUSTER_SCHEMA;
+  const id = `${ userValue.metadata.namespace }/${ userValue.metadata.name }`;
+
+  let lastError: any;
+
+  for (let depth = 0; depth < attempts; depth++) {
+    try {
+      return await userValue.save();
+    } catch (e) {
+      lastError = e;
+
+      if (!isConflictError(e) || !userValue.metadata?.name) {
+        throw e;
+      }
+
+      const server = await context.dispatch('management/find', {
+        type,
+        id,
+        opt: { force: true, watch: false },
+      }) as InfrastructureClusterResource;
+
+      if (initial && typeof (initial as any).toJSON === 'function') {
+        const conflicts = await handleConflict(
+          initial,
+          userValue,
+          server,
+          { dispatch: context.dispatch, getters: context.getters },
+          'management',
+        );
+
+        // Genuine conflict: the user edited fields the controller also changed.
+        if (conflicts !== false) {
+          throw new Error(Array.isArray(conflicts) ? conflicts.join(', ') : String(conflicts));
+        }
+      } else {
+        userValue.metadata.resourceVersion = server?.metadata?.resourceVersion;
+      }
+    }
+  }
+
+  throw lastError;
+}
+
+async function patchInfrastructureClusterChanges(
+  initial: InfrastructureClusterResource | null | undefined,
+  userValue: InfrastructureClusterResource,
+  context: StoreContext,
+): Promise<boolean> {
+  if (!initial || typeof (initial as any).toJSON !== 'function' || typeof (userValue as any).patch !== 'function') {
+    await saveWithConflictResolution(initial, userValue, context);
+
+    return true;
+  }
+
+  const initialClean = await context.dispatch('management/cleanForDiff', (initial as any).toJSON());
+  const userClean = await context.dispatch('management/cleanForDiff', (userValue as any).toJSON());
+
+  const patch = diff(initialClean, userClean);
+
+  delete patch.type;
+  delete patch.apiVersion;
+  delete patch.kind;
+  delete patch.id;
+  delete patch.metadata;
+
+  if (isEmpty(patch)) {
+    return false;
+  }
+
+  await (userValue as any).patch(patch, { headers: { 'content-type': 'application/merge-patch+json' } });
+
+  return true;
 }
 export async function prepareProvCluster(cluster: any, context: StoreContext): Promise<void> {
   if (!cluster?.spec?.rkeConfig?.additionalManifest) {
@@ -144,11 +232,13 @@ export async function initInfrastructureCluster(value: ClusterValue, clusterSche
         throw new Error(formatErrorMessage(context, 'capa.errors.creatingInfrastructureClusterConfig', e));
       }
     }
+    if (config && typeof (config as any).toJSON === 'function') {
+      config = await context.dispatch('management/clone', { resource: config }) as InfrastructureClusterResource;
+    }
+
     if (config) {
       config.spec = removeEmptyFields(config.spec) || {};
     }
-
-    // TODO handle case where config is still missing and make sure spec is setup correctly
     return config || {};
   }
 }
@@ -158,14 +248,13 @@ export async function createMachinePoolMachineConfig(machineConfigSchema: Machin
 
   await context.dispatch('management/waitForSchema', { type: machineConfigType });
 
-  const createConfig = await context.dispatch('management/createPopulated', {
+  const createConfig = await context.dispatch('management/create', {
     type:     machineConfigType,
     metadata: { namespace: DEFAULT_WORKSPACE }
   }) as InfrastructureMachineResource | undefined;
 
   const config = createConfig || {};
 
-  // TODO apply some defaults
   return config;
 }
 
@@ -200,6 +289,11 @@ export async function saveMachinePoolConfigs(pools: PoolEntry[], cluster: Cluste
         // with the current spec values, update the pool reference, then remove the old one.
         const oldConfig = entry.config;
 
+        if (!oldConfig) {
+          finalPools.push(entry.pool);
+          continue;
+        }
+
         // Clone before mutating so oldConfig retains its identity (links/id) for removal.
         const newConfig = await context.dispatch('management/clone', { resource: oldConfig }) as InfrastructureMachineResource;
 
@@ -215,13 +309,11 @@ export async function saveMachinePoolConfigs(pools: PoolEntry[], cluster: Cluste
         entry.config = neu;
         entry.pool.machineConfigRef.name = neu.metadata.name;
 
-        try {
-          if (oldConfig.remove) {
-            await oldConfig.remove();
-          }
-        } catch (e) {
-          throw new Error(formatErrorMessage(context, 'capa.errors.removingOldMachineConfig', e));
-        }
+        // Defer removing the old (now-replaced) template until after the cluster
+        // save commits the new machineConfigRef. Removing it here (before the
+        // cluster save) risks leaving the pool pointing at a deleted template if
+        // the cluster save then fails. cleanupMachinePoolConfigs handles removal.
+        entry.oldConfig = oldConfig;
       }
     } catch (e) {
       throw new Error(formatErrorMessage(context, 'capa.errors.savingMachineConfig', e));
@@ -235,7 +327,30 @@ export async function saveMachinePoolConfigs(pools: PoolEntry[], cluster: Cluste
   cluster.spec.rkeConfig.machinePools = finalPools;
 }
 
-export async function saveInfrastructureCluster(value: ClusterValue, infrastructureCluster: InfrastructureClusterResource | null, context: StoreContext, isEdit = false): Promise<void> {
+export async function cleanupMachinePoolConfigs(pools: PoolEntry[]): Promise<void> {
+  for (const entry of pools) {
+    if (entry.remove && entry.config?.remove) {
+      try {
+        await entry.config.remove();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('capa: failed to remove machine config for removed pool', e);
+      }
+    }
+
+    if (entry.oldConfig?.remove) {
+      try {
+        await entry.oldConfig.remove();
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('capa: failed to remove replaced machine template', e);
+      }
+      entry.oldConfig = null;
+    }
+  }
+}
+
+export async function saveInfrastructureCluster(value: ClusterValue, infrastructureCluster: InfrastructureClusterResource | null, context: StoreContext, isEdit = false, initialInfrastructureCluster: InfrastructureClusterResource | null = null): Promise<void> {
   if (!infrastructureCluster) {
     return;
   }
@@ -250,20 +365,23 @@ export async function saveInfrastructureCluster(value: ClusterValue, infrastruct
     }
   }
   try {
-    const infraCluster = await infrastructureCluster.save();
+    if (isEdit) {
+      await patchInfrastructureClusterChanges(initialInfrastructureCluster, infrastructureCluster, context);
 
-    if (!isEdit) {
-      if (!value.spec.rkeConfig) {
-        value.spec.rkeConfig = {};
-      }
-
-      set(value, 'spec.rkeConfig.infrastructureRef', {
-        kind:       'AWSCluster',
-        name:       infraCluster.metadata.name,
-        namespace:  infraCluster.metadata.namespace,
-        apiVersion: 'infrastructure.cluster.x-k8s.io/v1beta2',
-      });
+      return;
     }
+    const infraCluster = await saveWithConflictResolution(initialInfrastructureCluster, infrastructureCluster, context);
+
+    if (!value.spec.rkeConfig) {
+      value.spec.rkeConfig = {};
+    }
+
+    set(value, 'spec.rkeConfig.infrastructureRef', {
+      kind:       'AWSCluster',
+      name:       infraCluster.metadata.name,
+      namespace:  infraCluster.metadata.namespace,
+      apiVersion: 'infrastructure.cluster.x-k8s.io/v1beta2',
+    });
   } catch (e) {
     throw new Error(formatErrorMessage(context, 'capa.errors.savingInfrastructureCluster', e));
   }
@@ -302,5 +420,5 @@ export function removeEmptyFields(input: any): any {
 export function isCapaManagedVpcId(vpcId = '', vpcs = [] as AWS.VPC[]) {
   const vpc = vpcs.find((v) => v?.VpcId === vpcId);
 
-  return (vpc?.Tags || [])?.some((tag) => (tag.Key || '').startsWith(CAPA.CAPA_CLUSTER_PREFIX));
+  return (vpc?.Tags || [])?.some((tag: { Key?: string }) => (tag.Key || '').startsWith(CAPA.CAPA_CLUSTER_PREFIX));
 }

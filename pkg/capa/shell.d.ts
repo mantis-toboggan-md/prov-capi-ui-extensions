@@ -53,8 +53,53 @@ declare module '@shell/components/EmptyProductPage.vue' {
 }
 
 declare module '@shell/mixins/create-edit-view' {
-  const mixin: any;
+  const mixin: import('vue').DefineComponent<{}, {}, { value: any; errors: any[]; mode: string }>;
   export default mixin;
+}
+
+declare module '@shell/components/form/LabeledSelect' {
+  const component: any;
+  export default component;
+}
+
+declare module '@shell/components/form/UnitInput' {
+  const component: any;
+  export default component;
+}
+
+declare module '@shell/components/form/KeyValue' {
+  const component: any;
+  export default component;
+}
+
+declare module '@shell/components/form/ArrayList.vue' {
+  const component: any;
+  export default component;
+}
+
+declare module '@components/RcSection' {
+  export const RcSection: any;
+}
+
+declare module '@components/Form/LabeledInput' {
+  export const LabeledInput: any;
+}
+
+declare module '@components/Form/Checkbox' {
+  export const Checkbox: any;
+}
+
+declare module '@components/Form/Radio' {
+  export const RadioGroup: any;
+  export const Radio: any;
+}
+
+declare module '@shell/utils/promise' {
+  export function allHash(hash: Record<string, any>): Promise<Record<string, any>>;
+}
+
+declare module '@shell/plugins/dashboard-store/normalize' {
+  export function handleConflict(...args: any[]): any;
 }
 
 declare module '@shell/utils/error' {
@@ -67,6 +112,11 @@ declare module '@shell/utils/error' {
 
 declare module '@shell/utils/object' {
   export function set(obj: any, path: string, value: any): void;
+  export function diff(from: any, to: any): any;
+  export function isEmpty(obj: any): boolean;
+  export function isEqual(a: any, b: any): boolean;
+  export function convertStringToKV(str: string): Record<string, string>;
+  export function convertKVToString(obj: Record<string, string>): string;
 }
 
 declare module '@shell/plugins/dashboard-store/actions' {

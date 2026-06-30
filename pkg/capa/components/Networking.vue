@@ -18,7 +18,7 @@ import { isCapaManagedVpcId } from '../utils';
 import { CNI_INGRESS_RULES } from './constants';
 import { scrollToBottom } from '@shell/utils/scroll';
 import type { IngressRule, CNIIngressRule, SubnetSpec, SecurityGroupRole } from '../types/capa';
-import { isEqual } from '@shell/utils/object'
+import { isEqual } from '@shell/utils/object';
 
 defineOptions({ name: 'Networking' });
 
@@ -61,26 +61,26 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  mode:                               _CREATE,
-  ipv6:                               null,
-  cidrBlock:                          '',
-  securityGroupOverrides:             () => ({}),
-  additionalControlPlaneIngressRules: () => [],
-  additionalNodeIngressRules:         () => [],
-  cniIngressRules:                    () => [],
-  vpcInfo:                            () => [],
-  subnetInfo:                         () => [],
-  securityGroupInfo:                  () => [],
-  loadingVpcs:                        false,
-  loadingSubnets:                     false,
-  loadingSecurityGroups:              false,
-  useUnmanagedNetwork:                false,
-  provisioningCluster:                {},
-  vpcValidators:                                    () => [],
-  subnetValidators:                                 () => [],
-  cidrBlockValidators:                              () => [],
-  additionalControlPlaneIngressRulesValidators:     () => [],
-  additionalNodeIngressRulesValidators:             () => [],
+  mode:                                         _CREATE,
+  ipv6:                                         null,
+  cidrBlock:                                    '',
+  securityGroupOverrides:                       () => ({}),
+  additionalControlPlaneIngressRules:           () => [],
+  additionalNodeIngressRules:                   () => [],
+  cniIngressRules:                              () => [],
+  vpcInfo:                                      () => [],
+  subnetInfo:                                   () => [],
+  securityGroupInfo:                            () => [],
+  loadingVpcs:                                  false,
+  loadingSubnets:                               false,
+  loadingSecurityGroups:                        false,
+  useUnmanagedNetwork:                          false,
+  provisioningCluster:                          {},
+  vpcValidators:                                () => [],
+  subnetValidators:                             () => [],
+  cidrBlockValidators:                          () => [],
+  additionalControlPlaneIngressRulesValidators: () => [],
+  additionalNodeIngressRulesValidators:         () => [],
 });
 
 const {
@@ -196,12 +196,12 @@ function goToBasicsCniSelect(e: MouseEvent) {
 
 // clear out vpcid and subnets if the radio group changes the value of useUnmanagedNetwork
 // this avoids clearing out vpcid/subnets aws set when useUnmanagedNetwork is initialized on edit
-function userUpdatedUnamangedNetwork(neu: boolean){
-  if(!neu){
+function userUpdatedUnamangedNetwork(neu: boolean) {
+  if (!neu) {
     emit('update:vpcId', null);
     emit('update:subnets', null);
   }
-  emit('update:useUnmanagedNetwork', neu)
+  emit('update:useUnmanagedNetwork', neu);
 }
 
 watch(vpcId, () => {
@@ -260,20 +260,20 @@ watch(allowCNIRules, (allowed) => {
   }
 });
 
-watch(provClusterCNI, (newCni = '', oldCni='') => {
+watch(provClusterCNI, (newCni = '', oldCni = '') => {
   // if the CNI ingress rules ui is currently hidden because its overriden, update stored values so rules are correct if overrides are removed
   const source = allowCNIRules.value ? cniIngressRules.value : storedCNIIngressRules.value;
   const currentRules = [...(source || [])];
 
   // match cni options that include multus, eg "multus, calico" should use calico rules
-  const oldCNIKey = Object.keys(CNI_INGRESS_RULES).find(k=>oldCni.includes(k))
+  const oldCNIKey = Object.keys(CNI_INGRESS_RULES).find((k) => oldCni.includes(k));
   // Remove rules matching the old CNI
   const oldRules = oldCNIKey ? (CNI_INGRESS_RULES as Record<string, CNIIngressRule[]>)[oldCNIKey] || [] : [];
   const filtered = currentRules.filter((rule) => {
     return !oldRules.some((oldRule) => isEqual(oldRule, rule));
   });
 
-  const newCNIKey = Object.keys(CNI_INGRESS_RULES).find(k=>newCni.includes(k))
+  const newCNIKey = Object.keys(CNI_INGRESS_RULES).find((k) => newCni.includes(k));
   // Add rules for the new CNI
   const newRules = newCNIKey ? (CNI_INGRESS_RULES as Record<string, CNIIngressRule[]>)[newCNIKey] || [] : [];
   const updated = [...filtered, ...newRules];
@@ -293,8 +293,8 @@ watch(provClusterCNI, (newCni = '', oldCni='') => {
     name="network-strategy"
     :options="networkStrategyOptions"
     :mode="mode"
-    @update:value="userUpdatedUnamangedNetwork"
     :disabled="!isCreate"
+    @update:value="userUpdatedUnamangedNetwork"
   />
 
   <RcSection
@@ -314,8 +314,8 @@ watch(provClusterCNI, (newCni = '', oldCni='') => {
         name="vpc"
         :rules="vpcValidators"
         required
-        @update:value="$emit('update:vpcId', $event)"
         :disabled="!isCreate"
+        @update:value="$emit('update:vpcId', $event)"
       />
     </div>
     <div class="mb-20 span-6">

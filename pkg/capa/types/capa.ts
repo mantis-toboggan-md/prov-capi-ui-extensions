@@ -6,7 +6,6 @@ export type Translator = (key: string, args?: Record<string, any>) => string;
 export type StringMap = Record<string, string>;
 export type Tags = Record<string, string>;
 
-
 export interface ResourceMetadata {
   name?: string;
   namespace?: string;
@@ -110,6 +109,7 @@ export interface MachineTemplateSpec {
 
 export interface InfrastructureClusterResource {
   id?: string;
+  type?: string;
   metadata: ResourceMetadata;
   spec: AWSClusterSpec;
   links?: Record<string, unknown>;
@@ -154,6 +154,7 @@ export interface PoolEntry {
   update?: boolean;
   pool: MachinePool;
   config: InfrastructureMachineResource;
+  oldConfig?: InfrastructureMachineResource | null;
 }
 
 export interface MachineConfigSchema {

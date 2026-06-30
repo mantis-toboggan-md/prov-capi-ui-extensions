@@ -1,0 +1,138 @@
+<script setup lang="ts">
+import { computed } from 'vue';
+import { useStore } from 'vuex';
+import { useI18n } from '@shell/composables/useI18n';
+import { RcSection } from '@components/RcSection';
+import ArrayList from '@shell/components/form/ArrayList.vue';
+import LabeledSelect from '@shell/components/form/LabeledSelect.vue';
+import LabeledInput from '@components/Form/LabeledInput/LabeledInput.vue';
+import UnitInput from '@shell/components/form/UnitInput.vue';
+import Checkbox from '@components/Form/Checkbox/Checkbox.vue';
+import { VOLUME_TYPE_OPTIONS } from './constants';
+import { _CREATE } from '@shell/config/query-params';
+
+defineOptions({ name: 'StorageSection' });
+
+interface Props {
+  value: Record<string, any>;
+  rootVolumeTypeOptions?: { label: string; value: string }[];
+  mode?: string;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  rootVolumeTypeOptions: () => VOLUME_TYPE_OPTIONS,
+  mode:                  _CREATE,
+});
+
+const store = useStore();
+const { t } = useI18n(store);
+
+const additionalVolumeTypeOptions = computed(() => VOLUME_TYPE_OPTIONS);
+</script>
+
+<template>
+  <RcSection
+    :title="t('capa.machineConfig.storage.title')"
+    :expandable="true"
+    mode="with-header"
+    type="primary"
+  >
+    <p>{{ t('capa.machineConfig.storage.description') }}</p>
+
+    <div class="row">
+      <UnitInput
+        v-model:value="value.rootVolume.size"
+        label-key="capa.machineConfig.storage.rootVolume.size.label"
+        suffix="GiB"
+        class="mr-10"
+        :mode="mode"
+      />
+      <LabeledSelect
+        v-model:value="value.rootVolume.type"
+        :options="rootVolumeTypeOptions"
+        label-key="capa.machineConfig.storage.rootVolume.type.label"
+        required
+        :mode="mode"
+      />
+    </div>
+
+    <Checkbox
+      v-model:value="value.rootVolume.encrypted"
+      :mode="mode"
+      :label="t('capa.machineConfig.storage.rootVolume.encrypted.label')"
+    />
+    <LabeledInput
+      v-if="value.rootVolume.encrypted"
+      v-model:value="value.rootVolume.encryptionKey"
+      label-key="capa.machineConfig.storage.rootVolume.encryptionKey.label"
+      placeholder-key="capa.machineConfig.storage.rootVolume.encryptionKey.placeholder"
+      required
+      :mode="mode"
+    />
+
+    <RcSection
+      :title="t('capa.machineConfig.storage.advanced.title')"
+      :expandable="true"
+      mode="with-header"
+      type="secondary"
+      :expanded="false"
+    >
+      <ArrayList
+        v-model:value="value.nonRootVolumes"
+        :add-allowed="true"
+        :default-add-value="{ deviceName: '', type: 'gp3', size: null }"
+        :add-label="t('capa.machineConfig.storage.advanced.additionalVolumes.add')"
+        :show-header="true"
+        class="mb-10 additional-volumes-list"
+        :mode="mode"
+      >
+        <template #columns="{ row, queueUpdate }">
+          <div class="additional-volumes-grid">
+            <LabeledInput
+              v-model:value="row.value.deviceName"
+              label-key="capa.machineConfig.storage.advanced.additionalVolumes.deviceName.label"
+              class="additional-volume-field"
+              :mode="mode"
+              @update:value="queueUpdate"
+            />
+            <LabeledSelect
+              v-model:value="row.value.type"
+              :options="additionalVolumeTypeOptions"
+              label-key="capa.machineConfig.storage.advanced.additionalVolumes.type.label"
+              class="additional-volume-field"
+              :mode="mode"
+              @update:value="queueUpdate"
+            />
+            <UnitInput
+              v-model:value="row.value.size"
+              label-key="capa.machineConfig.storage.advanced.additionalVolumes.size.label"
+              class="additional-volume-field"
+              :mode="mode"
+              suffix="GiB"
+              @update:value="queueUpdate"
+            />
+          </div>
+        </template>
+      </ArrayList>
+    </RcSection>
+  </RcSection>
+</template>
+
+<style lang="scss" scoped>
+.additional-volumes-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  width: 100%;
+}
+
+.additional-volume-field {
+  min-width: 0;
+}
+
+@media (max-width: 1024px) {
+  .additional-volumes-grid {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

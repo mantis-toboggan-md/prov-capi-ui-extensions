@@ -1,135 +1,273 @@
-<script lang="ts">
+<script setup lang="ts">
+import {
+  computed, onMounted, ref, toRefs, watch, WritableComputedRef
+} from 'vue';
+import { useStore } from 'vuex';
 import Loading from '@shell/components/Loading';
 import { Banner } from '@components/Banner';
-import CreateEditView from '@shell/mixins/create-edit-view';
-import { HTTP_TOKENS_VALUES } from './constants';
-import { NORMAN } from '@shell/config/types';
-import { exceptionToErrorsArray, formatAWSError, stringify } from '@shell/utils/error';
+import { HTTP_TOKENS_VALUES, UBUNTU_LTS_AMI_NAME_PATTERNS } from './constants';
+import { allHash } from '@shell/utils/promise';
+import { stringify, exceptionToErrorsArray, formatAWSError } from '@shell/utils/error';
 import { _CREATE } from '@shell/config/query-params';
+import InstanceConfigSection from './InstanceConfigSection.vue';
+import StorageSection from './StorageSection.vue';
+import AdvancedSection from './AdvancedSection.vue';
 import merge from 'lodash/merge';
-import { removeEmptyFields } from '../utils';
+
+defineOptions({ name: 'MachineConfigCapa' });
 
 const defaultConfig = {
   spec: {
     template: {
       spec: {
-        ami:                     { id: 'ami-0d13e2317a7e75c95' },
         cloudInit:               { insecureSkipSecretsManager: true },
-        iamInstanceProfile:      'control-plane.cluster-api-provider-aws.sigs.k8s.io',
+        iamInstanceProfile:      '',
         instanceMetadataOptions: { httpTokens: HTTP_TOKENS_VALUES.REQUIRED },
         instanceType:            't3.medium',
         marketType:              'OnDemand',
         publicIp:                false,
         rootVolume:              {
-          encrypted: false, size: 30, type: 'gp3'
+          encrypted: false, size: 32, type: 'gp3'
         },
-        sshKeyName:     'eva',
-        subnet:         { id: 'subnet-02e4caf6f4ee75111' },
+        sshKeyName:     '',
         privateDnsName: { hostnameType: 'resource-name' }
       }
     }
   }
 };
 
-export default {
-  components: { Banner, Loading },
+const emit = defineEmits(['validationChanged', 'update:isIpv6', 'update:isDualStack', 'update:value']);
 
-  mixins: [CreateEditView],
+interface Props {
+  value: Record<string, any>;
+  uuid: string;
+  infrastructureCluster?: Record<string, any>;
+  cluster?: Record<string, any>;
+  credentialId: string;
+  isIpv6?: boolean;
+  isDualStack?: boolean;
+  machinePools?: any[];
+  poolCreateMode?: boolean;
+  mode?: string;
+}
 
-  emits: ['validationChanged', 'update:value'],
+const props = withDefaults(defineProps<Props>(), {
+  infrastructureCluster: () => ({}),
+  cluster:               () => ({}),
+  isIpv6:                false,
+  isDualStack:           false,
+  machinePools:          () => [],
+  poolCreateMode:        true,
+  mode:                  _CREATE,
+});
 
-  props: {
-    uuid: {
-      type:     String,
-      required: true,
-    },
+const {
+  value,
+  credentialId,
+  infrastructureCluster,
+  mode,
+} = toRefs(props);
 
-    infrastructureCluster: {
-      type:    Object,
-      default: () => ({})
-    },
+const store = useStore();
 
-    credentialId: {
-      type:     String,
-      required: true,
-    },
+const errors = ref<any[]>([]);
+const loading = ref(true);
+const ec2Client = ref<any>(null);
+const iamClient = ref<any>(null);
+const instanceTypes = ref<any>(null);
+const instanceProfiles = ref<any>(null);
+const loadedRegionalFor = ref<string | null>(null);
+const subnets = ref<any>(null);
+const securityGroups = ref<any>(null);
+const keyPairs = ref<any>(null);
 
-    disabled: {
-      type:    Boolean,
-      default: false
-    },
+const spec: WritableComputedRef<Record<string, any>> = computed({
+  get() {
+    value.value.spec = value.value.spec || {};
+    value.value.spec.template = value.value.spec.template || {};
+    value.value.spec.template.spec = value.value.spec.template.spec || {};
 
-    isIpv6: {
-      type:    Boolean,
-      default: false
-    },
-
-    isDualStack: {
-      type:    Boolean,
-      default: false
-    },
-
-    machinePools: {
-      type:    Array,
-      default: () => []
-    },
-
-    poolCreateMode: {
-      type:    Boolean,
-      default: true
-    },
-    mode: {
-      type:    String,
-      default: _CREATE,
-    },
+    return value.value.spec.template.spec;
   },
+  set(neu: Record<string, any>) {
+    value.value.spec = value.value.spec || {};
+    value.value.spec.template = value.value.spec.template || {};
+    value.value.spec.template.spec = neu;
+  },
+});
 
-  async fetch() {
-    const self = this as any;
+const region = computed(() => infrastructureCluster.value?.spec?.region || null);
 
-    self.errors = [];
-    if ( !self.credentialId ) {
-      return;
-    }
+// Subnet ids explicitly defined on the infrastructure cluster. Empty when the
+// cluster relies on cluster-managed (auto-discovered) subnets.
+const clusterSubnetIds = computed(() => {
+  return (infrastructureCluster.value?.spec?.network?.subnets || [])
+    .map((subnet: { id?: string }) => subnet.id)
+    .filter((id: string | undefined): id is string => !!id);
+});
 
-    try {
-      if ( self.credential?.id !== self.credentialId ) {
-        self.credential = await self.$store.dispatch('rancher/find', { type: NORMAN.CLOUD_CREDENTIAL, id: self.credentialId });
-      }
-    } catch (e) {
-      self.credential = null;
-    }
+// Look up the most recent Canonical Ubuntu LTS AMI available in the current region
+async function fetchLatestUbuntuAmi(): Promise<string | null> {
+  for ( const namePattern of UBUNTU_LTS_AMI_NAME_PATTERNS ) {
+    const images: Array<{ ImageId?: string; CreationDate?: string }> = await store.dispatch('aws/depaginateList', {
+      client: ec2Client.value,
+      cmd:    'describeImages',
+      key:    'Images',
+      opt:    {
+        Filters: [
+          { Name: 'name', Values: [namePattern] },
+          { Name: 'architecture', Values: ['x86_64'] },
+          { Name: 'root-device-type', Values: ['ebs'] },
+          { Name: 'virtualization-type', Values: ['hvm'] },
+          { Name: 'state', Values: ['available'] },
+        ],
+      },
+    });
 
-    try {
-      const valueWithDefaults = merge({}, defaultConfig, self.value);
+    const latest = (images || [])
+      .filter((image) => !!image.ImageId && !!image.CreationDate)
+      .sort((a, b) => (b.CreationDate as string).localeCompare(a.CreationDate as string))[0];
 
-      // TODO this is a band-aid to make sure defaults are applied before validation, but should be refactored to be cleaner and not cause an extra render
-      // this.$emit('update:value', valueWithDefaults);
-      const cleanedValueWithDefaults = removeEmptyFields(valueWithDefaults);
-
-      Object.assign(self.value, cleanedValueWithDefaults || {});
-    } catch (e) {
-      self.errors = exceptionToErrorsArray(formatAWSError(e));
+    if ( latest?.ImageId ) {
+      return latest.ImageId;
     }
   }
-};
+
+  return null;
+}
+
+async function fetchData() {
+  errors.value = [];
+  if ( !credentialId.value || !region.value ) {
+    loading.value = false;
+
+    return;
+  }
+
+  loading.value = true;
+  try {
+    ec2Client.value = await store.dispatch('aws/ec2', {
+      region:            region.value,
+      cloudCredentialId: credentialId.value
+    });
+    iamClient.value = await store.dispatch('aws/iam', {
+      region:            region.value,
+      cloudCredentialId: credentialId.value
+    });
+
+    if ( !instanceTypes.value ) {
+      instanceTypes.value = await store.dispatch('aws/describeInstanceTypes', { client: ec2Client.value });
+    }
+
+    const hash: Record<string, any> = {};
+
+    if ( loadedRegionalFor.value !== region.value ) {
+      hash.subnets = await ec2Client.value.describeSubnets({});
+      hash.instanceProfiles = await iamClient.value.listInstanceProfiles({});
+      hash.securityGroups = await ec2Client.value.describeSecurityGroups({});
+      hash.keyPairs = await ec2Client.value.describeKeyPairs({});
+    }
+
+    const res = await allHash(hash);
+
+    const refMap: Record<string, typeof subnets> = {
+      subnets,
+      instanceProfiles,
+      securityGroups,
+      keyPairs,
+    };
+
+    for ( const k in res ) {
+      if ( refMap[k] ) {
+        refMap[k].value = res[k];
+      }
+    }
+
+    if ( !value.value.instanceType ) {
+      value.value['instanceType'] = store.getters['aws/defaultInstanceType'];
+    }
+
+    loadedRegionalFor.value = region.value;
+    const valueWithDefaults = merge({}, defaultConfig, value.value);
+
+    Object.assign(value.value, valueWithDefaults || {});
+
+    spec.value.ami = spec.value.ami || {};
+    if ( mode.value === _CREATE && !spec.value.ami.id ) {
+      const amiId = await fetchLatestUbuntuAmi();
+
+      if ( amiId ) {
+        spec.value.ami = { ...spec.value.ami, id: amiId };
+      }
+    }
+  } catch (e) {
+    errors.value = exceptionToErrorsArray(formatAWSError(e));
+  } finally {
+    loading.value = false;
+  }
+}
+
+if (!value.value.instanceMetadataOptions?.httpTokens) {
+  value.value.instanceMetadataOptions = {
+    ...value.value.instanceMetadataOptions,
+    httpTokens: HTTP_TOKENS_VALUES.REQUIRED,
+  };
+}
+
+if (!Array.isArray(value.value.additionalVolumes)) {
+  value.value.additionalVolumes = [];
+}
+
+watch(credentialId, () => {
+  fetchData();
+});
+
+watch(region, (newRegion, oldRegion) => {
+  if (newRegion === oldRegion) {
+    return;
+  }
+  fetchData();
+});
+
+onMounted(() => {
+  fetchData();
+});
 </script>
 
 <template>
   <div>
-    <Loading v-if="$fetchState.pending" />
-    <template v-else>
-      <div v-if="errors.length">
-        <div
-          v-for="(err, idx) in errors"
-          :key="idx"
-        >
-          <Banner
-            color="error"
-            :label="stringify(err)"
-          />
-        </div>
+    <div v-if="errors.length">
+      <div
+        v-for="(err, idx) in errors"
+        :key="idx"
+      >
+        <Banner
+          color="error"
+          :label="stringify(err)"
+        />
       </div>
+    </div>
+    <Loading v-if="loading || !loadedRegionalFor" />
+    <template v-else>
+      <InstanceConfigSection
+        v-model:value="spec"
+        :instance-types="instanceTypes"
+        :subnets="subnets"
+        :instance-profiles="instanceProfiles"
+        :key-pairs="keyPairs"
+        :cluster-subnet-ids="clusterSubnetIds"
+        :mode="mode"
+        @validationChanged="$emit('validationChanged', $event)"
+      />
+      <StorageSection
+        v-model:value="spec"
+        :mode="mode"
+      />
+      <AdvancedSection
+        v-model:value="spec"
+        :security-groups="securityGroups"
+        :mode="mode"
+      />
     </template>
   </div>
 </template>
