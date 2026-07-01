@@ -362,6 +362,7 @@ watch(provClusterCNI, (newCni = '', oldCni = '') => {
     :expandable="true"
     mode="with-header"
     type="secondary"
+    :expanded="false"
   >
     <Banner
       color="warning"

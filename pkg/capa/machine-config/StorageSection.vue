@@ -4,10 +4,10 @@ import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { RcSection } from '@components/RcSection';
 import ArrayList from '@shell/components/form/ArrayList.vue';
-import LabeledSelect from '@shell/components/form/LabeledSelect.vue';
-import LabeledInput from '@components/Form/LabeledInput/LabeledInput.vue';
-import UnitInput from '@shell/components/form/UnitInput.vue';
-import Checkbox from '@components/Form/Checkbox/Checkbox.vue';
+import LabeledSelect from '@shell/components/form/LabeledSelect';
+import { LabeledInput } from '@components/Form/LabeledInput';
+import UnitInput from '@shell/components/form/UnitInput';
+import { Checkbox } from '@components/Form/Checkbox';
 import { VOLUME_TYPE_OPTIONS } from './constants';
 import { _CREATE } from '@shell/config/query-params';
 
@@ -17,16 +17,25 @@ interface Props {
   value: Record<string, any>;
   rootVolumeTypeOptions?: { label: string; value: string }[];
   mode?: string;
+  loadingKmsKeys?: boolean;
+  kmsKeys?: Record<string, any>[];
 }
 
 const props = withDefaults(defineProps<Props>(), {
   rootVolumeTypeOptions: () => VOLUME_TYPE_OPTIONS,
   mode:                  _CREATE,
+  loadingKmsKeys:        false,
+  kmsKeys:               () => [],
 });
 
 const store = useStore();
-const { t } = useI18n(store);
+const { t } = useI18n(store);;
 
+const kmsKeyOptions = computed(() => {
+  return (props.kmsKeys || [])
+    .map((keyPair: Record<string, any>) => ({ label: keyPair.KeyArn, value: keyPair.KeyId }))
+    .filter((key: { label: string; value: string } | undefined): key is { label: string; value: string } => !!key);
+});
 const additionalVolumeTypeOptions = computed(() => VOLUME_TYPE_OPTIONS);
 </script>
 
@@ -62,13 +71,15 @@ const additionalVolumeTypeOptions = computed(() => VOLUME_TYPE_OPTIONS);
       :mode="mode"
       :label="t('capa.machineConfig.storage.rootVolume.encrypted.label')"
     />
-    <LabeledInput
+    <LabeledSelect
       v-if="value.rootVolume.encrypted"
       v-model:value="value.rootVolume.encryptionKey"
+      :options="kmsKeyOptions"
       label-key="capa.machineConfig.storage.rootVolume.encryptionKey.label"
       placeholder-key="capa.machineConfig.storage.rootVolume.encryptionKey.placeholder"
       required
       :mode="mode"
+      :loading="loadingKmsKeys"
     />
 
     <RcSection

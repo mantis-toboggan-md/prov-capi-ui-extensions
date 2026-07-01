@@ -152,6 +152,36 @@ async function patchInfrastructureClusterChanges(
 
   return true;
 }
+
+function serializeResource(resource: any): any {
+  return typeof resource?.toJSON === 'function' ? resource.toJSON() : resource;
+}
+
+async function machineConfigWasModified(entry: PoolEntry, context: StoreContext): Promise<boolean> {
+  const config = entry.config as any;
+
+  if (!config?.metadata?.name) {
+    return true;
+  }
+
+  try {
+    const type = config.type || config._type || AWS_MACHINE_TEMPLATE_SCHEMA;
+    const id = config.id || `${ config.metadata.namespace || DEFAULT_WORKSPACE }/${ config.metadata.name }`;
+    const server = await context.dispatch('management/find', {
+      type,
+      id,
+      opt: { force: true, watch: false },
+    });
+
+    const serverClean = await context.dispatch('management/cleanForDiff', serializeResource(server));
+    const configClean = await context.dispatch('management/cleanForDiff', serializeResource(config));
+
+    return !isEmpty(diff(serverClean, configClean));
+  } catch (e) {
+    // If comparison fails, preserve previous behavior and recreate the template.
+    return true;
+  }
+}
 export async function prepareProvCluster(cluster: any, context: StoreContext): Promise<void> {
   if (!cluster?.spec?.rkeConfig?.additionalManifest) {
     set(cluster, 'spec.rkeConfig.additionalManifest', ADDITIONAL_MANIFEST);
@@ -291,6 +321,11 @@ export async function saveMachinePoolConfigs(pools: PoolEntry[], cluster: Cluste
       } else if (entry.update) {
         // Upstream CAPI machine templates are immutable: create a replacement resource
         // with the current spec values, update the pool reference, then remove the old one.
+        if (!await machineConfigWasModified(entry, context)) {
+          finalPools.push(entry.pool);
+          continue;
+        }
+
         const oldConfig = entry.config;
 
         if (!oldConfig) {
@@ -426,3 +461,4 @@ export function isCapaManagedVpcId(vpcId = '', vpcs = [] as AWS.VPC[]) {
 
   return (vpc?.Tags || [])?.some((tag: { Key?: string }) => (tag.Key || '').startsWith(CAPA.CAPA_CLUSTER_PREFIX));
 }
+

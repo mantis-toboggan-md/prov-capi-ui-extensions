@@ -3,10 +3,10 @@ import { computed, watch } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { RcSection } from '@components/RcSection';
-import LabeledSelect from '@shell/components/form/LabeledSelect.vue';
-import LabeledInput from '@components/Form/LabeledInput/LabeledInput.vue';
-import Checkbox from '@components/Form/Checkbox/Checkbox.vue';
-import Banner from '@components/Banner/Banner.vue';
+import LabeledSelect from '@shell/components/form/LabeledSelect';
+import { LabeledInput } from '@components/Form/LabeledInput';
+import { Checkbox } from '@components/Form/Checkbox';
+import { Banner } from '@components/Banner';
 import { getSubnetDisplayName } from '@shell/utils/aws';
 import { HTTP_TOKENS_VALUES } from './constants';
 import { _CREATE } from '@shell/config/query-params';
@@ -20,29 +20,40 @@ const emit = defineEmits(['validationChanged']);
 interface Props {
   value: Record<string, any>;
   instanceTypes?: Record<string, any>[];
-  subnets?: Record<string, any>;
-  instanceProfiles?: Record<string, any>;
-  keyPairs?: Record<string, any>;
+  subnets?: Record<string, any>[];
+  instanceProfiles?: Record<string, any>[];
+  keyPairs?: Record<string, any>[];
+  vpcId?: string;
   // Subnet ids explicitly defined on the infrastructure cluster. Empty when the
   // cluster relies on cluster-managed (auto-discovered) subnets.
   clusterSubnetIds?: string[];
   mode?: string;
-  disabled?: boolean;
+  loadingSshKeys?: boolean;
+  loadingInstanceProfiles?: boolean;
+  loadingSubnets?: boolean;
+  loadingSecurityGroups?: boolean;
+  loadingInstanceTypes?: boolean;
+  isAmiAutoPopulated?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   instanceTypes:    () => [],
-  subnets:          () => ({}),
-  instanceProfiles: () => ({}),
-  keyPairs:         () => ({}),
+  subnets:          () => [],
+  instanceProfiles: () => [],
+  keyPairs:         () => [],
+  vpcId:            '',
   clusterSubnetIds: () => [],
   mode:             _CREATE,
-  disabled:         false,
+  loadingSshKeys:   false,
+  loadingInstanceProfiles: false,
+  loadingSubnets:   false,
+  loadingSecurityGroups: false,
+  loadingInstanceTypes: false,
+  isAmiAutoPopulated: false,
 });
 
 const store = useStore();
 const { t } = useI18n(store);
-
 const httpTokensOptions = computed(() => [
   { label: t('capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.options.required'), value: HTTP_TOKENS_VALUES.REQUIRED },
   { label: t('capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.options.optional'), value: HTTP_TOKENS_VALUES.OPTIONAL },
@@ -73,10 +84,13 @@ const instanceTypeOptions = computed(() => {
 });
 
 const subnetOptions = computed(() => {
-  const options = (props.subnets?.Subnets || []).map((subnet: Record<string, any>) => ({
-    label: getSubnetDisplayName(subnet as any),
-    value: subnet['SubnetId'],
-  }));
+  const options = (props.subnets || [])
+    .filter((subnet: Record<string, any>) => !!props.vpcId && subnet.VpcId === props.vpcId)
+    .map((subnet: Record<string, any>) => ({
+      label: getSubnetDisplayName(subnet as any),
+      value: subnet['SubnetId'],
+    }))
+    .sort((a: { label: string }, b: { label: string }) => a.label.localeCompare(b.label));
 
   return [
     { label: t('capa.machineConfig.instanceConfiguration.subnet.none'), value: SUBNET_NONE },
@@ -86,6 +100,10 @@ const subnetOptions = computed(() => {
 
 const selectedSubnetId = computed({
   get() {
+    if (!props.vpcId) {
+      return SUBNET_NONE;
+    }
+
     return props.value.subnet?.id || SUBNET_NONE;
   },
   set(val: string) {
@@ -93,12 +111,12 @@ const selectedSubnetId = computed({
       props.value.subnet = {};
     }
 
-    props.value.subnet.id = val === SUBNET_NONE ? null : val;
+    props.value.subnet.id = (!props.vpcId || val === SUBNET_NONE) ? null : val;
   }
 });
 
 const instanceProfileOptions = computed(() => {
-  return (props.instanceProfiles?.InstanceProfiles || [])
+  return (props.instanceProfiles || [])
     .map((profile: Record<string, any>) => profile.InstanceProfileName)
     .filter((name: string | undefined) => !!name);
 });
@@ -106,7 +124,7 @@ const instanceProfileOptions = computed(() => {
 const sshKeyOptions = computed(() => {
   const noneOption = { label: t('capa.machineConfig.instanceConfiguration.sshKeyName.noneLabel'), value: '' };
 
-  const keys = (props.keyPairs?.KeyPairs || [])
+  const keys = (props.keyPairs || [])
     .map((keyPair: Record<string, any>) => keyPair.KeyName)
     .filter((name: string | undefined): name is string => !!name)
     .map((name: string) => ({ label: name, value: name }));
@@ -146,6 +164,24 @@ const subnetBanner = computed(() => {
   };
 });
 
+const amiDisplayId = computed({
+  get() {
+    const amiId = props.value.ami?.id || '';
+
+    if (props.isAmiAutoPopulated && amiId) {
+      return `${ amiId } (${ t('capa.machineConfig.instanceConfiguration.advanced.machineImage.latestUbuntu') })`;
+    }
+
+    return amiId;
+  },
+  set(val: string) {
+    if (!props.value.ami) {
+      props.value.ami = {};
+    }
+    props.value.ami.id = val;
+  },
+});
+
 watch(subnetPublicIpError, () => {
   emit('validationChanged', !subnetPublicIpError.value);
 }, { immediate: true });
@@ -167,7 +203,7 @@ watch(subnetPublicIpError, () => {
       option-key="value"
       option-label="label"
       :mode="mode"
-      required
+      :loading="loadingInstanceTypes"
     />
     <LabeledSelect
       v-model:value="value.sshKeyName"
@@ -176,6 +212,7 @@ watch(subnetPublicIpError, () => {
       label-key="capa.machineConfig.instanceConfiguration.sshKeyName.label"
       :sub-label="t('capa.machineConfig.instanceConfiguration.sshKeyName.description')"
       required
+      :loading="loadingSshKeys"
     />
     <LabeledSelect
       v-model:value="selectedSubnetId"
@@ -184,6 +221,7 @@ watch(subnetPublicIpError, () => {
       option-key="value"
       option-label="label"
       :mode="mode"
+      :loading="loadingSubnets"
     />
     <Banner
       v-if="subnetBanner"
@@ -205,7 +243,7 @@ watch(subnetPublicIpError, () => {
       :expanded="false"
     >
       <LabeledInput
-        v-model:value="value.ami.id"
+        v-model:value="amiDisplayId"
         label-key="capa.machineConfig.instanceConfiguration.advanced.machineImage.label"
         :placeholder="t('capa.machineConfig.instanceConfiguration.advanced.machineImage.placeholder')"
         :mode="mode"
@@ -215,6 +253,7 @@ watch(subnetPublicIpError, () => {
         :options="instanceProfileOptions"
         :taggable="true"
         :mode="mode"
+        :loading="loadingInstanceProfiles"
         label-key="capa.machineConfig.instanceConfiguration.advanced.iamInstanceProfileName.label"
       />
       <div>

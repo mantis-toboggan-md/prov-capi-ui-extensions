@@ -3,11 +3,11 @@ import { ref, computed } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { RcSection } from '@components/RcSection';
-import Checkbox from '@components/Form/Checkbox/Checkbox.vue';
+import { Checkbox } from '@components/Form/Checkbox';
 import { RadioGroup } from '@components/Form/Radio';
-import LabeledSelect from '@shell/components/form/LabeledSelect.vue';
-import KeyValue from '@shell/components/form/KeyValue.vue';
-import UnitInput from '@shell/components/form/UnitInput.vue';
+import LabeledSelect from '@shell/components/form/LabeledSelect';
+import KeyValue from '@shell/components/form/KeyValue';
+import UnitInput from '@shell/components/form/UnitInput';
 import { SECURITY_GROUP_OPTIONS } from './constants';
 
 defineOptions({ name: 'AdvancedSection' });
@@ -15,14 +15,14 @@ defineOptions({ name: 'AdvancedSection' });
 interface Props {
   value: Record<string, any>;
   mode?: string;
-  securityGroups?: Record<string, any>;
+  securityGroups?: Record<string, any>[];
   vpcId?: string;
   loadingSecurityGroups?: boolean;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   mode:                  'create',
-  securityGroups:        () => ({}),
+  securityGroups:        () => [],
   vpcId:                 '',
   loadingSecurityGroups: false,
 });
@@ -32,15 +32,22 @@ const { t } = useI18n(store);
 
 const securityGroupMode = ref(props.value.additionalSecurityGroups?.length ? 'replace' : 'merge');
 
-const securityGroupOptions = computed(() => SECURITY_GROUP_OPTIONS.map((o) => ({
-  label: t(o.labelKey),
-  value: o.value,
-})));
+const securityGroupOptions = computed(() => SECURITY_GROUP_OPTIONS
+  .map((o) => ({
+    label: t(o.labelKey),
+    value: o.value,
+  })));
 
-const existingSecurityGroupOptions = computed(() => (props.securityGroups?.SecurityGroups || []).map((sg: Record<string, any>) => ({
-  label: sg.GroupName ? `${ sg.GroupName } (${ sg.GroupId })` : sg.GroupId,
-  value: sg.GroupId,
-})));
+const existingSecurityGroupOptions = computed(() => {
+  const groups = props.vpcId
+    ? (props.securityGroups || []).filter((sg: Record<string, any>) => sg.VpcId === props.vpcId)
+    : (props.securityGroups || []);
+
+  return groups.map((sg: Record<string, any>) => ({
+    label: sg.GroupName ? `${ sg.GroupName } (${ sg.GroupId })` : sg.GroupId,
+    value: sg.GroupId,
+  }));
+});
 
 const selectedSecurityGroupIds = computed({
   get() {
@@ -102,6 +109,7 @@ function onSecurityGroupModeChange(mode: string) {
       :options="securityGroupOptions"
       label-key="capa.machineConfig.advanced.securityGroup.label"
       class="mt-20 mb-10"
+      :disabled="!vpcId"
       :mode="mode"
       @update:value="onSecurityGroupModeChange"
     />
@@ -113,6 +121,7 @@ function onSecurityGroupModeChange(mode: string) {
       :mode="mode"
       :label="t('capa.machineConfig.advanced.securityGroup.existingLabel')"
       class="mb-10"
+      :loading="loadingSecurityGroups"
     />
 
     <RcSection

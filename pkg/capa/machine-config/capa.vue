@@ -3,17 +3,16 @@ import {
   computed, onMounted, ref, toRefs, watch, WritableComputedRef
 } from 'vue';
 import { useStore } from 'vuex';
-import Loading from '@shell/components/Loading';
+import { useI18n } from '@shell/composables/useI18n';
 import { Banner } from '@components/Banner';
 import { HTTP_TOKENS_VALUES, UBUNTU_LTS_AMI_NAME_PATTERNS } from './constants';
-import { allHash } from '@shell/utils/promise';
-import { stringify, exceptionToErrorsArray, formatAWSError } from '@shell/utils/error';
+import { stringify } from '@shell/utils/error';
 import { _CREATE } from '@shell/config/query-params';
 import InstanceConfigSection from './InstanceConfigSection.vue';
 import StorageSection from './StorageSection.vue';
 import AdvancedSection from './AdvancedSection.vue';
 import merge from 'lodash/merge';
-
+import debounce from 'lodash/debounce';
 defineOptions({ name: 'MachineConfigCapa' });
 
 const defaultConfig = {
@@ -36,7 +35,7 @@ const defaultConfig = {
   }
 };
 
-const emit = defineEmits(['validationChanged', 'update:isIpv6', 'update:isDualStack', 'update:value']);
+const emit = defineEmits(['validationChanged', 'update:value']);
 
 interface Props {
   value: Record<string, any>;
@@ -44,20 +43,12 @@ interface Props {
   infrastructureCluster?: Record<string, any>;
   cluster?: Record<string, any>;
   credentialId: string;
-  isIpv6?: boolean;
-  isDualStack?: boolean;
-  machinePools?: any[];
-  poolCreateMode?: boolean;
   mode?: string;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   infrastructureCluster: () => ({}),
   cluster:               () => ({}),
-  isIpv6:                false,
-  isDualStack:           false,
-  machinePools:          () => [],
-  poolCreateMode:        true,
   mode:                  _CREATE,
 });
 
@@ -69,25 +60,56 @@ const {
 } = toRefs(props);
 
 const store = useStore();
+const { t } = useI18n(store);
 
 const errors = ref<any[]>([]);
-const loading = ref(true);
 const ec2Client = ref<any>(null);
 const iamClient = ref<any>(null);
+const kmsClient = ref<any>(null);
 const instanceTypes = ref<any>(null);
 const instanceProfiles = ref<any>(null);
-const loadedRegionalFor = ref<string | null>(null);
 const subnets = ref<any>(null);
 const securityGroups = ref<any>(null);
-const keyPairs = ref<any>(null);
+const sshKeys = ref<any>(null);
+const kmsKeys = ref<any>(null);
+const loadingInstanceTypes = ref(false);
+const loadingSshKeys = ref(false);
+const loadingInstanceProfiles = ref(false);
+const loadingSubnets = ref(false);
+const loadingSecurityGroups = ref(false);
+const loadingKmsKeys = ref(false);
+const autoPopulatedAmiId = ref<string | null>(null);
 
 const spec: WritableComputedRef<Record<string, any>> = computed({
   get() {
-    value.value.spec = value.value.spec || {};
-    value.value.spec.template = value.value.spec.template || {};
-    value.value.spec.template.spec = value.value.spec.template.spec || {};
+    const model = (value.value && typeof value.value === 'object') ? value.value : {};
 
-    return value.value.spec.template.spec;
+
+    model.spec = model.spec || {};
+    model.spec.template = model.spec.template || {};
+    model.spec.template.spec = model.spec.template.spec || {};
+
+    // Important: never replace the whole model in the getter. Replacing it
+    // causes v-model controls (e.g. publicIp checkbox) to snap back on render.
+    if (mode.value === _CREATE) {
+      model.spec.template.spec = merge({}, defaultConfig.spec.template.spec, model.spec.template.spec);
+    } else {
+      const s = model.spec.template.spec;
+
+      s.rootVolume = s.rootVolume || {};
+      s.ami = s.ami || {};
+      s.cloudInit = s.cloudInit || {};
+      s.instanceMetadataOptions = s.instanceMetadataOptions || {};
+      if (!Array.isArray(s.nonRootVolumes)) {
+        s.nonRootVolumes = [];
+      }
+      if (!Array.isArray(s.additionalSecurityGroups)) {
+        s.additionalSecurityGroups = [];
+      }
+      s.spotMarketOptions = s.spotMarketOptions || {};
+    }
+
+    return model.spec.template.spec;
   },
   set(neu: Record<string, any>) {
     value.value.spec = value.value.spec || {};
@@ -97,6 +119,7 @@ const spec: WritableComputedRef<Record<string, any>> = computed({
 });
 
 const region = computed(() => infrastructureCluster.value?.spec?.region || null);
+const vpcId = computed(() => infrastructureCluster.value?.spec?.network?.vpc?.id || '');
 
 // Subnet ids explicitly defined on the infrastructure cluster. Empty when the
 // cluster relies on cluster-managed (auto-discovered) subnets.
@@ -136,75 +159,118 @@ async function fetchLatestUbuntuAmi(): Promise<string | null> {
 
   return null;
 }
-
-async function fetchData() {
-  errors.value = [];
-  if ( !credentialId.value || !region.value ) {
-    loading.value = false;
-
+async function getSshKeys() {
+  loadingSshKeys.value = true;
+  if (!ec2Client.value || !region.value || !credentialId.value) {
+    sshKeys.value = [];
+    loadingSshKeys.value = false;
     return;
   }
 
-  loading.value = true;
   try {
-    ec2Client.value = await store.dispatch('aws/ec2', {
-      region:            region.value,
-      cloudCredentialId: credentialId.value
-    });
-    iamClient.value = await store.dispatch('aws/iam', {
-      region:            region.value,
-      cloudCredentialId: credentialId.value
-    });
+    const keys = await store.dispatch('aws/depaginateList', { client: ec2Client.value, cmd: 'describeKeyPairs' });
 
-    if ( !instanceTypes.value ) {
-      instanceTypes.value = await store.dispatch('aws/describeInstanceTypes', { client: ec2Client.value });
-    }
-
-    const hash: Record<string, any> = {};
-
-    if ( loadedRegionalFor.value !== region.value ) {
-      hash.subnets = await ec2Client.value.describeSubnets({});
-      hash.instanceProfiles = await iamClient.value.listInstanceProfiles({});
-      hash.securityGroups = await ec2Client.value.describeSecurityGroups({});
-      hash.keyPairs = await ec2Client.value.describeKeyPairs({});
-    }
-
-    const res = await allHash(hash);
-
-    const refMap: Record<string, typeof subnets> = {
-      subnets,
-      instanceProfiles,
-      securityGroups,
-      keyPairs,
-    };
-
-    for ( const k in res ) {
-      if ( refMap[k] ) {
-        refMap[k].value = res[k];
-      }
-    }
-
-    if ( !spec.value.instanceType ) {
-      spec.value.instanceType = store.getters['aws/defaultInstanceType'];
-    }
-
-    loadedRegionalFor.value = region.value;
-    const valueWithDefaults = merge({}, defaultConfig, value.value);
-
-    Object.assign(value.value, valueWithDefaults || {});
-
-    spec.value.ami = spec.value.ami || {};
-    if ( mode.value === _CREATE && !spec.value.ami.id ) {
-      const amiId = await fetchLatestUbuntuAmi();
-
-      if ( amiId ) {
-        spec.value.ami = { ...spec.value.ami, id: amiId };
-      }
-    }
+    sshKeys.value = keys || [];
   } catch (e) {
-    errors.value = exceptionToErrorsArray(formatAWSError(e));
+    errors.value.push(t('capa.errors.fetchingSshKeys', { error: e }));
   } finally {
-    loading.value = false;
+    loadingSshKeys.value = false;
+  }
+}
+
+async function getInstanceProfiles() {
+  loadingInstanceProfiles.value = true;
+  if (!iamClient.value || !region.value || !credentialId.value) {
+    instanceProfiles.value = [];
+    loadingInstanceProfiles.value = false;
+    return;
+  }
+
+  try {
+    const profiles = await store.dispatch('aws/depaginateList', { client: iamClient.value, cmd: 'listInstanceProfiles' });
+
+    instanceProfiles.value = profiles || [];
+  } catch (e) {
+    errors.value.push(t('capa.errors.fetchingInstanceProfiles', { error: e }));
+  }finally {
+    loadingInstanceProfiles.value = false;
+  }
+}
+
+async function getSubnets() {
+  loadingSubnets.value = true;
+  if (!ec2Client.value || !region.value || !credentialId.value) {
+    subnets.value = [];
+    loadingSubnets.value = false;
+    return;
+  }
+
+  try {
+    const subnetsList = await store.dispatch('aws/depaginateList', { client: ec2Client.value, cmd: 'describeSubnets' });
+
+    subnets.value = subnetsList || [];
+  } catch (e) {
+    errors.value.push(t('capa.errors.fetchingSubnets', { error: e }));
+  } finally {
+    loadingSubnets.value = false;
+  }
+}
+
+async function getSecurityGroups() {
+  loadingSecurityGroups.value = true;
+  if (!ec2Client.value || !region.value || !credentialId.value) {
+    securityGroups.value = [];
+    loadingSecurityGroups.value = false;
+    return;
+  }
+
+  try {
+    const groups = await store.dispatch('aws/depaginateList', { client: ec2Client.value, cmd: 'describeSecurityGroups' });
+
+    securityGroups.value = groups || [];
+  } catch (e) {
+    errors.value.push(t('capa.errors.fetchingSecurityGroups', { error: e }));
+  } finally {
+    loadingSecurityGroups.value = false;
+  }
+} 
+
+async function getKmsKeys() {
+  loadingKmsKeys.value = true;
+  if (!kmsClient.value || !region.value || !credentialId.value) {
+    loadingKmsKeys.value = false;
+    kmsKeys.value = [];
+    return [];
+  }
+
+  try {
+    const keys = await store.dispatch('aws/depaginateList', { client: kmsClient.value, cmd: 'listKeys' });
+    kmsKeys.value = keys || [];
+  } catch (e) {
+    errors.value.push(t('capa.errors.fetchingKmsKeys', { error: e }));
+  } finally {
+    loadingKmsKeys.value = false;
+  }
+
+  return [];
+}
+
+async function getInstanceTypes() {
+  loadingInstanceTypes.value = true;
+  if (!ec2Client.value || !region.value || !credentialId.value) {
+    instanceTypes.value = [];
+    loadingInstanceTypes.value = false;
+    return;
+  }
+
+  try {
+    const types = await store.dispatch('aws/describeInstanceTypes', { client: ec2Client.value });
+
+    instanceTypes.value = types || [];
+  } catch (e) {
+    errors.value.push(t('capa.errors.fetchingInstanceTypes', { error: e }));
+  } finally {
+    loadingInstanceTypes.value = false;
   }
 }
 
@@ -219,20 +285,95 @@ if (!Array.isArray(spec.value.nonRootVolumes)) {
    spec.value.nonRootVolumes = [];
 }
 
-watch(credentialId, () => {
-  fetchData();
-});
+const debouncedFetchAll = debounce(() => {
 
-watch(region, (newRegion, oldRegion) => {
-  if (newRegion === oldRegion) {
-    return;
+    getSshKeys();
+    getInstanceProfiles();
+    getSubnets();
+    getSecurityGroups();
+    getKmsKeys();
+    getInstanceTypes();
+    fetchLatestUbuntuAmi().then((amiId) => {
+      if (!amiId || mode.value !== _CREATE) {
+        return;
+      }
+      const currentAmi = spec.value?.ami?.id;
+      // Only auto-fill when the field is empty or still holds the previous
+      // auto-populated value (i.e. the user hasn't typed in a custom AMI).
+      if (!currentAmi || currentAmi === autoPopulatedAmiId.value) {
+        spec.value.ami = { ...(spec.value.ami || {}), id: amiId };
+        autoPopulatedAmiId.value = amiId;
+      }
+    }).catch((e) => {
+      errors.value.push(t('capa.errors.fetchingAmi', { error: e }));
+    });
+  }, 1);
+onMounted(async() => {
+  if (mode.value === _CREATE) {
+    const valueWithDefaults = merge({}, defaultConfig, value.value);
+
+    emit('update:value', valueWithDefaults || {});
   }
-  fetchData();
 });
 
-onMounted(() => {
-  fetchData();
-});
+watch([
+  () => region.value,
+  () => credentialId.value,
+], async([newRegion, newCredentialId], [oldRegion, oldCredentialId]) => {
+    errors.value = []
+    const credentialChanged = !!newCredentialId && newCredentialId !== oldCredentialId;
+
+    if(region.value && credentialId.value){
+        try {
+          ec2Client.value = await store.dispatch('aws/ec2', {
+            region:            region.value,
+            cloudCredentialId: credentialId.value
+          });
+        } catch (e) {
+          ec2Client.value = null;
+          errors.value.push(t('capa.errors.fetchingEc2Client', { error: e }));
+        }
+
+        try {
+          iamClient.value = await store.dispatch('aws/iam', {
+            region:            region.value,
+            cloudCredentialId: credentialId.value
+          });
+        } catch (e) {
+          iamClient.value = null;
+          errors.value.push(t('capa.errors.fetchingIamClient', { error: e }));
+        }
+
+        try {
+          kmsClient.value = await store.dispatch('aws/kms', {
+            region:            region.value,
+            cloudCredentialId: credentialId.value
+          });
+        } catch (e) {
+          kmsClient.value = null;
+          errors.value.push(t('capa.errors.fetchingKmsClient', { error: e }));
+        }
+
+        if(mode.value === _CREATE && (oldRegion && newRegion !== oldRegion || credentialChanged)){
+          spec.value.subnet = { ...(spec.value.subnet || {}), id: null };
+          spec.value.sshKeyName = '';
+          spec.value.additionalSecurityGroups = [];
+          spec.value.rootVolume = { ...(spec.value.rootVolume || {}), encryptionKey: '' };
+          // Clear the AMI only when it hasn't been customized
+          if (spec.value.ami?.id && spec.value.ami.id === autoPopulatedAmiId.value) {
+            spec.value.ami = { ...(spec.value.ami || {}), id: '' };
+          }
+        }
+
+        debouncedFetchAll();
+    } else {
+      subnets.value = []
+      sshKeys.value = []
+      securityGroups.value = []
+      instanceProfiles.value = []
+      kmsKeys.value = []
+    }
+}, { immediate: true });
 </script>
 
 <template>
@@ -248,27 +389,36 @@ onMounted(() => {
         />
       </div>
     </div>
-    <Loading v-if="loading || !loadedRegionalFor" />
-    <template v-else>
       <InstanceConfigSection
         v-model:value="spec"
         :instance-types="instanceTypes"
         :subnets="subnets"
         :instance-profiles="instanceProfiles"
-        :key-pairs="keyPairs"
+        :key-pairs="sshKeys"
+        :vpc-id="vpcId"
         :cluster-subnet-ids="clusterSubnetIds"
         :mode="mode"
+        :is-ami-auto-populated="!!autoPopulatedAmiId && spec.ami?.id === autoPopulatedAmiId"
+        :loading-ssh-keys="loadingSshKeys"
+        :loading-instance-profiles="loadingInstanceProfiles"
+        :loading-subnets="loadingSubnets"
+        :loading-instance-types="loadingInstanceTypes"
         @validationChanged="$emit('validationChanged', $event)"
       />
       <StorageSection
         v-model:value="spec"
         :mode="mode"
+        :kms-keys="kmsKeys"
+        :loading-kms-keys="loadingKmsKeys"
       />
       <AdvancedSection
         v-model:value="spec"
         :security-groups="securityGroups"
+        :loading-security-groups="loadingSecurityGroups"
+        :vpc-id="vpcId"
         :mode="mode"
       />
-    </template>
+
   </div>
 </template>
+

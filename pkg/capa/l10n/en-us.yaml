@@ -107,16 +107,17 @@ capa:
       subnet:
         label: Subnet
         none: 'None (use a cluster-managed subnet)'
-        notInClusterWarning: 'You can use a subnet not listed in the cluster, but only if no public IP is used.'
-        notInClusterError: 'Subnet {subnet} is not part of the cluster and cannot be used while a public IP is requested. Disable the public IP or choose a subnet defined on the cluster.'
+        notInClusterWarning: 'You can use a subnet not listed in the infrastructure cluster, unless you are assigning a public IP to this node pool'
+        notInClusterError: 'Subnet {subnet} is not part of the infrastructure cluster and cannot be used while a public IP is requested. Disable the public IP or choose a subnet defined on the infrastructure cluster.'
       publicIp:
         label: Assign a public IP
-        tooltip: 'Assign a public IP address to nodes in this pool. A public IP can only be used with subnets defined on the cluster.'
+        tooltip: 'Assign a public IP address to nodes in this pool. A public IP can only be used with subnets defined on the infrastructure cluster.'
       advanced:
-        title: Advanced instance settings
+        title: Advanced instance configuration settings
         machineImage:
           label: Machine image (AMI ID)
           placeholder: 'Default: A recent Ubuntu LTS'
+          latestUbuntu: Latest Ubuntu LTS
         iamInstanceProfileName:
           label: IAM Instance Profile Name
         instanceMetadataOptions:
