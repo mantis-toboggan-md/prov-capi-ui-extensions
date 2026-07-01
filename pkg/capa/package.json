@@ -1,7 +1,7 @@
 {
   "name": "capa",
   "description": "SUSE UI Extension to support Rancher v2 provisioning via CAPI CAPA",
-  "version": "0.0.0-rc2",
+  "version": "0.0.0-rc3",
   "private": false,
   "rancher": {
     "annotations": {
