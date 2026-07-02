@@ -2,7 +2,9 @@ import { normalizeName } from '@shell/utils/kube';
 import { DEFAULT_WORKSPACE } from '@shell/config/types';
 import { set } from '@shell/utils/object';
 import { createDoNotLogError } from '@shell/utils/error';
-import { AWS_MACHINE_TEMPLATE_SCHEMA, Translator, InfrastructureClusterResource, InfrastructureMachineResource, ClusterValue, MachineConfigSchema, MachinePool, PoolEntry, StoreContext } from './types/capa';
+import {
+  AWS_MACHINE_TEMPLATE_SCHEMA, Translator, InfrastructureClusterResource, InfrastructureMachineResource, ClusterValue, MachineConfigSchema, MachinePool, PoolEntry, StoreContext
+} from './types/capa';
 import * as AWS from '@shell/types/aws-sdk';
 import { CAPA } from './labels-annotations';
 
@@ -25,6 +27,37 @@ spec:
       - --v=5
       - --cloud-provider=aws`;
 
+const MACHINE_SELECTOR_CONFIG = [
+  {
+    config: {
+      'disable-cloud-controller': 'true',
+      machineLabelSelector:       {
+        matchExpressions: [
+          {
+            key:      'rke.cattle.io/control-plane-role',
+            operator: 'In',
+            values:   ['true']
+          }
+        ]
+      }
+    }
+  },
+  {
+    config: {
+      'disable-cloud-controller': 'true',
+      machineLabelSelector:       {
+        matchExpressions: [
+          {
+            key:      'rke.cattle.io/etcd-role',
+            operator: 'In',
+            values:   ['true']
+          }
+        ]
+      }
+    }
+  }
+];
+
 function formatErrorMessage(context: StoreContext, key: string, e?: any): string {
   const error = e instanceof Error || e?.message ? e.message : String(e);
   const t = context.t || context.$t;
@@ -39,6 +72,16 @@ export async function prepareProvCluster(cluster: any, context: StoreContext): P
   if (cluster?.agentConfig?.['cloud-provider-name'] !== 'external') {
     set(cluster, 'agentConfig.cloud-provider-name', 'external');
   }
+  if (!cluster?.spec?.rkeConfig?.machineSelectorConfig) {
+    set(cluster, 'spec.rkeConfig.machineSelectorConfig', MACHINE_SELECTOR_CONFIG);
+  } else {
+    const selectorConfig: any[] = cluster?.spec?.rkeConfig?.machineSelectorConfig || [];
+    const allPresent = MACHINE_SELECTOR_CONFIG.every((required) => selectorConfig.some((entry) => JSON.stringify(entry) === JSON.stringify(required)));
+
+    if (!allPresent) {
+      set(cluster, 'spec.rkeConfig.machineSelectorConfig', [...selectorConfig, ...MACHINE_SELECTOR_CONFIG]);
+    }
+  }
 }
 
 export function provisioningClusterValidation(cluster: any, context: StoreContext): void {
@@ -48,6 +91,14 @@ export function provisioningClusterValidation(cluster: any, context: StoreContex
 
   if (cluster.agentConfig?.['cloud-provider-name'] !== 'external') {
     throw createDoNotLogError(formatErrorMessage(context, 'capa.errors.invalidCloudProviderName'));
+  }
+
+  const selectorConfig: any[] = cluster?.spec?.rkeConfig?.machineSelectorConfig || [];
+  const allPresent = MACHINE_SELECTOR_CONFIG.every((required) => selectorConfig.some((entry) => JSON.stringify(entry) === JSON.stringify(required))
+  );
+
+  if (!allPresent) {
+    throw createDoNotLogError(formatErrorMessage(context, 'capa.errors.missingMachineSelectorConfig'));
   }
 }
 
