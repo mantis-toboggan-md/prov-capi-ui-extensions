@@ -1,7 +1,7 @@
 import { IClusterProvisioner, ClusterProvisionerContext } from '@shell/core/types';
 import { mapDriver } from '@shell/store/plugins';
 import {
-  createMachinePoolMachineConfig, initInfrastructureCluster, saveMachinePoolConfigs, saveInfrastructureCluster, prepareProvCluster, provisioningClusterValidation
+  createMachinePoolMachineConfig, initInfrastructureCluster, saveMachinePoolConfigs, cleanupMachinePoolConfigs, saveInfrastructureCluster, prepareProvCluster, provisioningClusterValidation
 } from './utils';
 import { AWS_CLUSTER_SCHEMA, AWS_MACHINE_TEMPLATE_SCHEMA, InfrastructureClusterResource } from './types/capa';
 import ClusterConfiguration from './components/ClusterConfiguration.vue';
@@ -34,8 +34,12 @@ export class CAPAProvisioner implements IClusterProvisioner {
     return async(pools: any[], cluster: any) => await saveMachinePoolConfigs(pools, cluster, this.context);
   }
 
-  get saveInfrastructureCluster(): (value: any, infrastructureCluster: any, isEdit: boolean) => Promise<void> {
-    return async(value, infrastructureCluster, isEdit) => await saveInfrastructureCluster(value, infrastructureCluster, this.context, isEdit);
+  get cleanupMachinePools(): (pools: any[]) => Promise<void> {
+    return async(pools: any[]) => await cleanupMachinePoolConfigs(pools);
+  }
+
+  get saveInfrastructureCluster(): (value: any, infrastructureCluster: any, isEdit: boolean, initialInfrastructureCluster?: any) => Promise<void> {
+    return async(value, infrastructureCluster, isEdit, initialInfrastructureCluster) => await saveInfrastructureCluster(value, infrastructureCluster, this.context, isEdit, initialInfrastructureCluster);
   }
 
   get initInfrastructureCluster(): (value: any) => Promise<InfrastructureClusterResource | {} | undefined> {
@@ -106,16 +110,23 @@ export class CAPAProvisioner implements IClusterProvisioner {
       return runProvisioningClusterValidation(this.value);
     }, 'validate-prov-cluster', 1);
     registerBeforeHook(async function(this: any) {
-      return runSaveInfrastructureCluster(this.value, this.infrastructureCluster, this.isEdit);
+      return runSaveInfrastructureCluster(this.value, this.infrastructureCluster, this.isEdit, this.infrastructureClusterInitialValue);
     }, 'save-infrastructure-cluster', 3);
   }
 
   registerInitHooks(registerInitHook: (fn: () => Promise<void>, name: string) => void, cluster: any): void {
     const runInitInfrastructureCluster = this.initInfrastructureCluster;
     const runPrepareProvCluster = this.prepareProvCluster;
+    const context = this.context;
 
     registerInitHook(async function(this: any) {
       this.infrastructureCluster = await runInitInfrastructureCluster(cluster);
+
+      // Snapshot the freshly-loaded infra cluster so save() can do a 3-way merge
+      // on conflict, mirroring how the core create-edit-view tracks initialValue.
+      const loaded = this.infrastructureCluster;
+
+      this.infrastructureClusterInitialValue = loaded && typeof loaded.toJSON === 'function' ? await context.dispatch('management/clone', { resource: loaded }) : null;
     }, 'init-infrastructure-cluster-for-capi');
 
     registerInitHook(() => {

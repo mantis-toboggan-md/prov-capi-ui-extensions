@@ -100,13 +100,23 @@ capa:
       description: Configuration options for the EC2 instance.
       instanceType:
         label: Instance type
+      sshKeyName:
+        label: SSH Key Name
+        noneLabel: None
+        description: A default SSH key to attach to instances in this pool.
       subnet:
         label: Subnet
+        none: 'None (use a cluster-managed subnet)'
+        notInClusterWarning: 'You can use a subnet not listed in the infrastructure cluster, unless you are assigning a public IP to this node pool'
+        notInClusterError: 'Subnet {subnet} is not part of the infrastructure cluster and cannot be used while a public IP is requested. Disable the public IP or choose a subnet defined on the infrastructure cluster.'
+      publicIp:
+        label: Assign a public IP
+        tooltip: 'Assign a public IP address to nodes in this pool. A public IP can only be used with subnets defined on the infrastructure cluster.'
       advanced:
-        title: Advanced instance settings
+        title: Advanced instance configuration settings
         machineImage:
           label: Machine image (AMI ID)
-          placeholder: 'Default: A recent Ubuntu LTS'
+          latestUbuntu: Latest Ubuntu LTS
         iamInstanceProfileName:
           label: IAM Instance Profile Name
         instanceMetadataOptions:
@@ -149,6 +159,7 @@ capa:
           label: Skip secrets manager (insecure)
       securityGroup:
         label: Security group
+        existingLabel: Security groups
         options:
           standard: "Standard: Automatically create and use a 'rancher-nodes' security group"
           existing: Choose one or more existing security groups
@@ -191,6 +202,13 @@ capa:
     fetchingVpcs: "Error fetching VPCs: {error}"
     fetchingSubnets: "Error fetching subnets: {error}"
     fetchingSecurityGroups: "Error fetching security groups: {error}"
+    fetchingInstanceProfiles: "Error fetching instance profiles: {error}"
+    fetchingKmsKeys: "Error fetching KMS keys: {error}"
+    fetchingInstanceTypes: "Error fetching instance types: {error}"
+    fetchingAmi: "Error fetching AMI: {error}"
+    fetchingEc2Client: "Error fetching EC2 client: {error}"
+    fetchingIamClient: "Error fetching IAM client: {error}"
+    fetchingKmsClient: "Error fetching KMS client: {error}"
     fetchingCloudCredential: "Error fetching Rancher Cloud Credential details: {error}"
     missingIdentityRef: "The selected cloud credential must contain a \"{annotation}\" annotation pointing to an AWSClusterStaticIdentity"
 

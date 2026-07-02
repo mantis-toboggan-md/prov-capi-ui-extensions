@@ -1,0 +1,319 @@
+<script setup lang="ts">
+import { computed, watch } from 'vue';
+import { useStore } from 'vuex';
+import { useI18n } from '@shell/composables/useI18n';
+import { RcSection } from '@components/RcSection';
+import LabeledSelect from '@shell/components/form/LabeledSelect';
+import { LabeledInput } from '@components/Form/LabeledInput';
+import { Checkbox } from '@components/Form/Checkbox';
+import { Banner } from '@components/Banner';
+import { getSubnetDisplayName } from '@shell/utils/aws';
+import { HTTP_TOKENS_VALUES, MACHINE_CONFIG_DEFAULTS } from './constants';
+import { _CREATE } from '@shell/config/query-params';
+
+const SUBNET_NONE = '__none__';
+
+defineOptions({ name: 'InstanceConfigSection' });
+
+const emit = defineEmits([
+  'validationChanged',
+  'update:instanceType',
+  'update:sshKeyName',
+  'update:subnetId',
+  'update:publicIp',
+  'update:amiId',
+  'update:iamInstanceProfile',
+  'update:instanceMetadataHttpTokens',
+]);
+
+interface Props {
+  instanceType?: string;
+  sshKeyName?: string;
+  subnetId?: string | null;
+  publicIp?: boolean;
+  amiId?: string | null;
+  iamInstanceProfile?: string;
+  instanceMetadataHttpTokens?: string;
+  instanceTypes?: Record<string, any>[];
+  subnets?: Record<string, any>[];
+  instanceProfiles?: Record<string, any>[];
+  keyPairs?: Record<string, any>[];
+  autoPopulatedAmiId?: string | null;
+  vpcId?: string;
+  // Subnet ids explicitly defined on the infrastructure cluster. Empty when the
+  // cluster relies on cluster-managed (auto-discovered) subnets.
+  clusterSubnetIds?: string[];
+  mode?: string;
+  loadingSshKeys?: boolean;
+  loadingInstanceProfiles?: boolean;
+  loadingSubnets?: boolean;
+  loadingSecurityGroups?: boolean;
+  loadingInstanceTypes?: boolean;
+  isAmiAutoPopulated?: boolean;
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  instanceType:     MACHINE_CONFIG_DEFAULTS.instanceType,
+  sshKeyName:       MACHINE_CONFIG_DEFAULTS.sshKeyName,
+  subnetId:         null,
+  publicIp:         MACHINE_CONFIG_DEFAULTS.publicIp,
+  amiId:            '',
+  iamInstanceProfile: MACHINE_CONFIG_DEFAULTS.iamInstanceProfile,
+  instanceMetadataHttpTokens: MACHINE_CONFIG_DEFAULTS.instanceMetadataOptions.httpTokens,
+  instanceTypes:    () => [],
+  subnets:          () => [],
+  instanceProfiles: () => [],
+  keyPairs:         () => [],
+  autoPopulatedAmiId: null,
+  vpcId:            '',
+  clusterSubnetIds: () => [],
+  mode:             _CREATE,
+  loadingSshKeys:   false,
+  loadingInstanceProfiles: false,
+  loadingSubnets:   false,
+  loadingSecurityGroups: false,
+  loadingInstanceTypes: false,
+  isAmiAutoPopulated: false,
+});
+
+const store = useStore();
+const { t } = useI18n(store);
+
+const modelInstanceType = computed({
+  get: () => props.instanceType || MACHINE_CONFIG_DEFAULTS.instanceType,
+  set: (val: string) => emit('update:instanceType', val),
+});
+
+const modelSshKeyName = computed({
+  get: () => props.sshKeyName || MACHINE_CONFIG_DEFAULTS.sshKeyName,
+  set: (val: string) => emit('update:sshKeyName', val),
+});
+
+const modelPublicIp = computed({
+  get: () => props.publicIp ?? MACHINE_CONFIG_DEFAULTS.publicIp,
+  set: (val: boolean) => emit('update:publicIp', val),
+});
+
+const modelIamInstanceProfile = computed({
+  get: () => props.iamInstanceProfile || MACHINE_CONFIG_DEFAULTS.iamInstanceProfile,
+  set: (val: string) => emit('update:iamInstanceProfile', val),
+});
+
+const modelInstanceMetadataHttpTokens = computed({
+  get: () => props.instanceMetadataHttpTokens || MACHINE_CONFIG_DEFAULTS.instanceMetadataOptions.httpTokens,
+  set: (val: string) => emit('update:instanceMetadataHttpTokens', val),
+});
+const httpTokensOptions = computed(() => [
+  { label: t('capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.options.required'), value: HTTP_TOKENS_VALUES.REQUIRED },
+  { label: t('capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.options.optional'), value: HTTP_TOKENS_VALUES.OPTIONAL },
+]);
+
+const instanceTypeOptions = computed(() => {
+  let lastGroup;
+  const out = [];
+
+  for ( const row of (props.instanceTypes || []) ) {
+    if ( row.groupLabel !== lastGroup ) {
+      out.push({
+        kind:     'group',
+        disabled: false,
+        label:    row.groupLabel
+      });
+
+      lastGroup = row.groupLabel;
+    }
+
+    out.push({
+      label: row['label'],
+      value: row['apiName'],
+    });
+  }
+
+  return out;
+});
+
+const subnetOptions = computed(() => {
+  const options = (props.subnets || [])
+    .filter((subnet: Record<string, any>) => !!props.vpcId && subnet.VpcId === props.vpcId)
+    .map((subnet: Record<string, any>) => ({
+      label: getSubnetDisplayName(subnet as any),
+      value: subnet['SubnetId'],
+    }))
+    .sort((a: { label: string }, b: { label: string }) => a.label.localeCompare(b.label));
+
+  return [
+    { label: t('capa.machineConfig.instanceConfiguration.subnet.none'), value: SUBNET_NONE },
+    ...options
+  ];
+});
+
+const selectedSubnetId = computed({
+  get() {
+    if (!props.vpcId) {
+      return SUBNET_NONE;
+    }
+
+    return props.subnetId || SUBNET_NONE;
+  },
+  set(val: string) {
+    emit('update:subnetId', (!props.vpcId || val === SUBNET_NONE) ? null : val);
+  }
+});
+
+const instanceProfileOptions = computed(() => {
+  return (props.instanceProfiles || [])
+    .map((profile: Record<string, any>) => profile.InstanceProfileName)
+    .filter((name: string | undefined) => !!name);
+});
+
+const sshKeyOptions = computed(() => {
+  const noneOption = { label: t('capa.machineConfig.instanceConfiguration.sshKeyName.noneLabel'), value: '' };
+
+  const keys = (props.keyPairs || [])
+    .map((keyPair: Record<string, any>) => keyPair.KeyName)
+    .filter((name: string | undefined): name is string => !!name)
+    .map((name: string) => ({ label: name, value: name }));
+
+  return [noneOption, ...keys];
+});
+
+const selectedSubnetNotInCluster = computed(() => {
+  const subnetId = props.subnetId;
+
+  if ( !subnetId ) {
+    return false;
+  }
+
+  return !(props.clusterSubnetIds || []).includes(subnetId);
+});
+
+const subnetPublicIpError = computed(() => {
+  return selectedSubnetNotInCluster.value && !!props.publicIp;
+});
+
+const subnetBanner = computed(() => {
+  if ( !selectedSubnetNotInCluster.value ) {
+    return null;
+  }
+
+  if ( subnetPublicIpError.value ) {
+    return {
+      color: 'error',
+      label: t('capa.machineConfig.instanceConfiguration.subnet.notInClusterError', { subnet: props.subnetId })
+    };
+  }
+
+  return {
+    color: 'warning',
+    label: t('capa.machineConfig.instanceConfiguration.subnet.notInClusterWarning')
+  };
+});
+
+const amiDisplayId = computed({
+  get() {
+    const amiId = props.amiId || '';
+
+    if (props.isAmiAutoPopulated && amiId) {
+      return `${ amiId } (${ t('capa.machineConfig.instanceConfiguration.advanced.machineImage.latestUbuntu') })`;
+    }
+
+    return amiId;
+  },
+  set(val: string) {
+    emit('update:amiId', val);
+  },
+});
+
+const amiPlaceholder = computed(() => {
+  return props.autoPopulatedAmiId || '';
+});
+
+watch(subnetPublicIpError, () => {
+  emit('validationChanged', !subnetPublicIpError.value);
+}, { immediate: true });
+</script>
+
+<template>
+  <RcSection
+    :title="t('capa.machineConfig.instanceConfiguration.title')"
+    :expandable="true"
+    mode="with-header"
+    type="primary"
+  >
+    <p>{{ t('capa.machineConfig.instanceConfiguration.description') }}</p>
+
+    <LabeledSelect
+      v-model:value="modelInstanceType"
+      :options="instanceTypeOptions"
+      label-key="capa.machineConfig.instanceConfiguration.instanceType.label"
+      option-key="value"
+      option-label="label"
+      :mode="mode"
+      :loading="loadingInstanceTypes"
+    />
+    <LabeledSelect
+      v-model:value="modelSshKeyName"
+      :options="sshKeyOptions"
+      :mode="mode"
+      label-key="capa.machineConfig.instanceConfiguration.sshKeyName.label"
+      :sub-label="t('capa.machineConfig.instanceConfiguration.sshKeyName.description')"
+      required
+      :loading="loadingSshKeys"
+    />
+    <LabeledSelect
+      v-model:value="selectedSubnetId"
+      :options="subnetOptions"
+      label-key="capa.machineConfig.instanceConfiguration.subnet.label"
+      option-key="value"
+      option-label="label"
+      :mode="mode"
+      :loading="loadingSubnets"
+    />
+    <Banner
+      v-if="subnetBanner"
+      :color="subnetBanner.color"
+      :label="subnetBanner.label"
+    />
+    <Checkbox
+      v-model:value="modelPublicIp"
+      :mode="mode"
+      label-key="capa.machineConfig.instanceConfiguration.publicIp.label"
+      :tooltip="t('capa.machineConfig.instanceConfiguration.publicIp.tooltip')"
+    />
+
+    <RcSection
+      :title="t('capa.machineConfig.instanceConfiguration.advanced.title')"
+      :expandable="true"
+      mode="with-header"
+      type="secondary"
+      :expanded="false"
+    >
+      <LabeledInput
+        v-model:value="amiDisplayId"
+        label-key="capa.machineConfig.instanceConfiguration.advanced.machineImage.label"
+        :placeholder="amiPlaceholder"
+        :mode="mode"
+        required
+      />
+      <LabeledSelect
+        v-model:value="modelIamInstanceProfile"
+        :options="instanceProfileOptions"
+        :taggable="true"
+        :mode="mode"
+        :loading="loadingInstanceProfiles"
+        label-key="capa.machineConfig.instanceConfiguration.advanced.iamInstanceProfileName.label"
+      />
+      <div>
+        <LabeledSelect
+          v-model:value="modelInstanceMetadataHttpTokens"
+          :options="httpTokensOptions"
+          label-key="capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.label"
+          :mode="mode"
+        />
+        <p class="text-muted text-small mt-5 mb-0">
+          {{ t('capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.description') }}
+        </p>
+      </div>
+    </RcSection>
+  </RcSection>
+</template>
