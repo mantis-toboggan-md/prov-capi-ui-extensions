@@ -7,8 +7,20 @@ import { AWS_CLUSTER_SCHEMA, AWS_MACHINE_TEMPLATE_SCHEMA, InfrastructureClusterR
 import ClusterConfiguration from './components/ClusterConfiguration.vue';
 import { isProviderEnabled } from '@shell/utils/settings';
 
+export const detailTabs = {
+      machines:     true,
+      logs:         true,
+      related:      true,
+      conditions:   true,
+      snapshots:    true,
+      registration: false,
+      autoscaler:   false,
+      events:       false,
+    };
+
+export const PROVIDER = 'awsmachinetemplate'
 export class CAPAProvisioner implements IClusterProvisioner {
-  static ID = 'awsmachinetemplate';
+  static ID = PROVIDER
 
   constructor(private context: ClusterProvisionerContext) {
     context.dispatch('plugins/mapDriver', { name: this.id, to: 'aws' }, { root: true });
@@ -81,15 +93,7 @@ export class CAPAProvisioner implements IClusterProvisioner {
   }
 
   get detailTabs(): any {
-    return {
-      machines:     false,
-      logs:         false,
-      registration: false,
-      snapshots:    false,
-      related:      true,
-      events:       false,
-      conditions:   false,
-    };
+    return detailTabs
   }
 
   get showImport(): boolean {
