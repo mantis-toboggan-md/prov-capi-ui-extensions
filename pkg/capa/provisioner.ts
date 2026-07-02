@@ -4,8 +4,9 @@ import {
   createMachinePoolMachineConfig, initInfrastructureCluster, saveMachinePoolConfigs, cleanupMachinePoolConfigs, saveInfrastructureCluster, prepareProvCluster, provisioningClusterValidation
 } from './utils';
 import { AWS_CLUSTER_SCHEMA, AWS_MACHINE_TEMPLATE_SCHEMA, InfrastructureClusterResource } from './types/capa';
+import { CAPI } from '@shell/config/types';
 import ClusterConfiguration from './components/ClusterConfiguration.vue';
-import { isProviderEnabled } from '@shell/utils/settings';
+
 
 export const detailTabs = {
       machines:     true,
@@ -24,6 +25,8 @@ export class CAPAProvisioner implements IClusterProvisioner {
 
   constructor(private context: ClusterProvisionerContext) {
     context.dispatch('plugins/mapDriver', { name: this.id, to: 'aws' }, { root: true });
+    //ensure capi providers are loaded so the hidden getter works (controlling the option in the cluster creation type selection screen)
+    context.dispatch('management/findAll', { type: CAPI.CAPI_PROVIDER});
   }
 
   get id(): string {
@@ -85,7 +88,9 @@ export class CAPAProvisioner implements IClusterProvisioner {
   }
 
   get hidden(): boolean {
-    return !isProviderEnabled(this.context, 'aws');
+    const providers = this.context.getters['management/all'](CAPI.CAPI_PROVIDER) || [];
+
+    return !providers.some((p: any) => p.metadata?.name === 'aws');
   }
 
   get extensionInfrastructureSection(): any {
