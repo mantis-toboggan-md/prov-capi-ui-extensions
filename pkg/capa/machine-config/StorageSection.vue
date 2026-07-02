@@ -46,7 +46,7 @@ const props = withDefaults(defineProps<Props>(), {
 });
 
 const store = useStore();
-const { t } = useI18n(store);;
+const { t } = useI18n(store);
 
 const modelRootVolumeSize = computed({
   get: () => props.rootVolumeSize ?? MACHINE_CONFIG_DEFAULTS.rootVolume.size,
