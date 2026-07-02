@@ -116,7 +116,6 @@ capa:
         title: Advanced instance configuration settings
         machineImage:
           label: Machine image (AMI ID)
-          placeholder: 'Default: A recent Ubuntu LTS'
           latestUbuntu: Latest Ubuntu LTS
         iamInstanceProfileName:
           label: IAM Instance Profile Name

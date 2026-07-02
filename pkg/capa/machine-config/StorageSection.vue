@@ -8,20 +8,37 @@ import LabeledSelect from '@shell/components/form/LabeledSelect';
 import { LabeledInput } from '@components/Form/LabeledInput';
 import UnitInput from '@shell/components/form/UnitInput';
 import { Checkbox } from '@components/Form/Checkbox';
-import { VOLUME_TYPE_OPTIONS } from './constants';
+import { MACHINE_CONFIG_DEFAULTS, NON_ROOT_VOLUME_DEFAULT, VOLUME_TYPE_OPTIONS } from './constants';
 import { _CREATE } from '@shell/config/query-params';
 
 defineOptions({ name: 'StorageSection' });
 
 interface Props {
-  value: Record<string, any>;
+  rootVolumeSize?: number;
+  rootVolumeType?: string;
+  rootVolumeEncrypted?: boolean;
+  rootVolumeEncryptionKey?: string | null;
+  nonRootVolumes?: Record<string, any>[];
   rootVolumeTypeOptions?: { label: string; value: string }[];
   mode?: string;
   loadingKmsKeys?: boolean;
   kmsKeys?: Record<string, any>[];
 }
 
+const emit = defineEmits([
+  'update:rootVolumeSize',
+  'update:rootVolumeType',
+  'update:rootVolumeEncrypted',
+  'update:rootVolumeEncryptionKey',
+  'update:nonRootVolumes',
+]);
+
 const props = withDefaults(defineProps<Props>(), {
+  rootVolumeSize:        MACHINE_CONFIG_DEFAULTS.rootVolume.size,
+  rootVolumeType:        MACHINE_CONFIG_DEFAULTS.rootVolume.type,
+  rootVolumeEncrypted:   MACHINE_CONFIG_DEFAULTS.rootVolume.encrypted,
+  rootVolumeEncryptionKey: null,
+  nonRootVolumes:        () => [],
   rootVolumeTypeOptions: () => VOLUME_TYPE_OPTIONS,
   mode:                  _CREATE,
   loadingKmsKeys:        false,
@@ -30,6 +47,31 @@ const props = withDefaults(defineProps<Props>(), {
 
 const store = useStore();
 const { t } = useI18n(store);;
+
+const modelRootVolumeSize = computed({
+  get: () => props.rootVolumeSize ?? MACHINE_CONFIG_DEFAULTS.rootVolume.size,
+  set: (val: number) => emit('update:rootVolumeSize', val),
+});
+
+const modelRootVolumeType = computed({
+  get: () => props.rootVolumeType || MACHINE_CONFIG_DEFAULTS.rootVolume.type,
+  set: (val: string) => emit('update:rootVolumeType', val),
+});
+
+const modelRootVolumeEncrypted = computed({
+  get: () => !!props.rootVolumeEncrypted,
+  set: (val: boolean) => emit('update:rootVolumeEncrypted', val),
+});
+
+const modelRootVolumeEncryptionKey = computed({
+  get: () => props.rootVolumeEncryptionKey || '',
+  set: (val: string) => emit('update:rootVolumeEncryptionKey', val),
+});
+
+const modelNonRootVolumes = computed({
+  get: () => props.nonRootVolumes || [],
+  set: (val: Record<string, any>[]) => emit('update:nonRootVolumes', val),
+});
 
 const kmsKeyOptions = computed(() => {
   return (props.kmsKeys || [])
@@ -50,7 +92,7 @@ const additionalVolumeTypeOptions = computed(() => VOLUME_TYPE_OPTIONS);
 
     <div class="row">
       <UnitInput
-        v-model:value="value.rootVolume.size"
+        v-model:value="modelRootVolumeSize"
         label-key="capa.machineConfig.storage.rootVolume.size.label"
         suffix="GiB"
         class="mr-10"
@@ -58,7 +100,7 @@ const additionalVolumeTypeOptions = computed(() => VOLUME_TYPE_OPTIONS);
         :mode="mode"
       />
       <LabeledSelect
-        v-model:value="value.rootVolume.type"
+        v-model:value="modelRootVolumeType"
         :options="rootVolumeTypeOptions"
         label-key="capa.machineConfig.storage.rootVolume.type.label"
         required
@@ -67,13 +109,13 @@ const additionalVolumeTypeOptions = computed(() => VOLUME_TYPE_OPTIONS);
     </div>
 
     <Checkbox
-      v-model:value="value.rootVolume.encrypted"
+      v-model:value="modelRootVolumeEncrypted"
       :mode="mode"
       :label="t('capa.machineConfig.storage.rootVolume.encrypted.label')"
     />
     <LabeledSelect
-      v-if="value.rootVolume.encrypted"
-      v-model:value="value.rootVolume.encryptionKey"
+      v-if="modelRootVolumeEncrypted"
+      v-model:value="modelRootVolumeEncryptionKey"
       :options="kmsKeyOptions"
       label-key="capa.machineConfig.storage.rootVolume.encryptionKey.label"
       placeholder-key="capa.machineConfig.storage.rootVolume.encryptionKey.placeholder"
@@ -90,9 +132,9 @@ const additionalVolumeTypeOptions = computed(() => VOLUME_TYPE_OPTIONS);
       :expanded="false"
     >
       <ArrayList
-        v-model:value="value.nonRootVolumes"
+        v-model:value="modelNonRootVolumes"
         :add-allowed="true"
-        :default-add-value="{ deviceName: '', type: 'gp3', size: null }"
+        :default-add-value="NON_ROOT_VOLUME_DEFAULT"
         :add-label="t('capa.machineConfig.storage.advanced.additionalVolumes.add')"
         :show-header="true"
         class="mb-10 additional-volumes-list"

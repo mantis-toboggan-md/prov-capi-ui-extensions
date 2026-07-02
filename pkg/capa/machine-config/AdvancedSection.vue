@@ -8,20 +8,38 @@ import { RadioGroup } from '@components/Form/Radio';
 import LabeledSelect from '@shell/components/form/LabeledSelect';
 import KeyValue from '@shell/components/form/KeyValue';
 import UnitInput from '@shell/components/form/UnitInput';
-import { SECURITY_GROUP_OPTIONS } from './constants';
+import { MACHINE_CONFIG_DEFAULTS, SECURITY_GROUP_OPTIONS } from './constants';
+import { _CREATE } from '@shell/config/query-params';
 
 defineOptions({ name: 'AdvancedSection' });
 
 interface Props {
-  value: Record<string, any>;
+  cloudInitInsecureSkipSecretsManager?: boolean;
+  additionalSecurityGroups?: Array<{ id: string }>;
+  marketType?: string;
+  spotMarketMaxPrice?: string;
+  additionalTags?: Record<string, string>;
   mode?: string;
   securityGroups?: Record<string, any>[];
   vpcId?: string;
   loadingSecurityGroups?: boolean;
 }
 
+const emit = defineEmits([
+  'update:cloudInitInsecureSkipSecretsManager',
+  'update:additionalSecurityGroups',
+  'update:marketType',
+  'update:spotMarketMaxPrice',
+  'update:additionalTags',
+]);
+
 const props = withDefaults(defineProps<Props>(), {
-  mode:                  'create',
+  cloudInitInsecureSkipSecretsManager: MACHINE_CONFIG_DEFAULTS.cloudInit.insecureSkipSecretsManager,
+  additionalSecurityGroups: () => [],
+  marketType:             MACHINE_CONFIG_DEFAULTS.marketType,
+  spotMarketMaxPrice:     '',
+  additionalTags:         () => ({}),
+  mode:                  _CREATE,
   securityGroups:        () => [],
   vpcId:                 '',
   loadingSecurityGroups: false,
@@ -30,7 +48,17 @@ const props = withDefaults(defineProps<Props>(), {
 const store = useStore();
 const { t } = useI18n(store);
 
-const securityGroupMode = ref(props.value.additionalSecurityGroups?.length ? 'replace' : 'merge');
+const modelCloudInitInsecureSkipSecretsManager = computed({
+  get: () => props.cloudInitInsecureSkipSecretsManager ?? MACHINE_CONFIG_DEFAULTS.cloudInit.insecureSkipSecretsManager,
+  set: (val: boolean) => emit('update:cloudInitInsecureSkipSecretsManager', val),
+});
+
+const modelMarketType = computed({
+  get: () => props.marketType || MACHINE_CONFIG_DEFAULTS.marketType,
+  set: (val: string) => emit('update:marketType', val),
+});
+
+const securityGroupMode = ref((props.additionalSecurityGroups || []).length ? 'replace' : 'merge');
 
 const securityGroupOptions = computed(() => SECURITY_GROUP_OPTIONS
   .map((o) => ({
@@ -51,36 +79,36 @@ const existingSecurityGroupOptions = computed(() => {
 
 const selectedSecurityGroupIds = computed({
   get() {
-    return (props.value.additionalSecurityGroups || []).map((sg: Record<string, any>) => sg.id);
+    return (props.additionalSecurityGroups || []).map((sg: Record<string, any>) => sg.id);
   },
   set(ids: string[]) {
-    props.value.additionalSecurityGroups = (ids || []).map((id: string) => ({ id }));
+    emit('update:additionalSecurityGroups', (ids || []).map((id: string) => ({ id })));
   },
 });
 
 const spotMaxPrice = computed({
   get() {
-    return props.value.spotMarketOptions?.maxPrice;
+    return props.spotMarketMaxPrice;
   },
   set(maxPrice: string | number | null | undefined) {
     const normalized = (maxPrice === null || maxPrice === undefined || maxPrice === '') ? undefined : String(maxPrice);
-    props.value.spotMarketOptions = { ...props.value.spotMarketOptions, maxPrice: normalized };
+    emit('update:spotMarketMaxPrice', normalized as string);
   },
 });
 
 const tags = computed({
   get() {
-    return props.value.additionalTags;
+    return props.additionalTags;
   },
   set(additionalTags: Record<string, string>) {
-    props.value.additionalTags = additionalTags;
+    emit('update:additionalTags', additionalTags);
   },
 });
 
 function onSecurityGroupModeChange(mode: string) {
   securityGroupMode.value = mode;
   if ( mode !== 'replace' ) {
-    props.value.additionalSecurityGroups = [];
+    emit('update:additionalSecurityGroups', []);
   }
 }
 </script>
@@ -96,7 +124,7 @@ function onSecurityGroupModeChange(mode: string) {
     <div>
       <p>{{ t('capa.machineConfig.advanced.cloudInit.title') }}</p>
       <Checkbox
-        v-model:value="value.cloudInit.insecureSkipSecretsManager"
+        v-model:value="modelCloudInitInsecureSkipSecretsManager"
         :label="t('capa.machineConfig.advanced.cloudInit.disable.label')"
         class="mt-10"
         :mode="mode"
@@ -132,16 +160,16 @@ function onSecurityGroupModeChange(mode: string) {
     >
       <p>{{ t('capa.machineConfig.advanced.marketType.description') }}</p>
       <RadioGroup
-        v-model:value="value.marketType"
+        v-model:value="modelMarketType"
         name="market-type"
         :mode="mode"
         :options="[
-          { label: t('capa.machineConfig.advanced.marketType.options.onDemand'), value: 'OnDemand' },
+          { label: t('capa.machineConfig.advanced.marketType.options.onDemand'), value: MACHINE_CONFIG_DEFAULTS.marketType },
           { label: t('capa.machineConfig.advanced.marketType.options.spot'), value: 'Spot' },
           { label: t('capa.machineConfig.advanced.marketType.options.block'), value: 'CapacityBlock' },
         ]"
       />
-      <div v-if="value.marketType === 'Spot'">
+      <div v-if="modelMarketType === 'Spot'">
         <UnitInput
           v-model:value="spotMaxPrice"
           label-key="capa.machineConfig.advanced.marketType.price.label"

@@ -8,21 +8,37 @@ import { LabeledInput } from '@components/Form/LabeledInput';
 import { Checkbox } from '@components/Form/Checkbox';
 import { Banner } from '@components/Banner';
 import { getSubnetDisplayName } from '@shell/utils/aws';
-import { HTTP_TOKENS_VALUES } from './constants';
+import { HTTP_TOKENS_VALUES, MACHINE_CONFIG_DEFAULTS } from './constants';
 import { _CREATE } from '@shell/config/query-params';
 
 const SUBNET_NONE = '__none__';
 
 defineOptions({ name: 'InstanceConfigSection' });
 
-const emit = defineEmits(['validationChanged']);
+const emit = defineEmits([
+  'validationChanged',
+  'update:instanceType',
+  'update:sshKeyName',
+  'update:subnetId',
+  'update:publicIp',
+  'update:amiId',
+  'update:iamInstanceProfile',
+  'update:instanceMetadataHttpTokens',
+]);
 
 interface Props {
-  value: Record<string, any>;
+  instanceType?: string;
+  sshKeyName?: string;
+  subnetId?: string | null;
+  publicIp?: boolean;
+  amiId?: string | null;
+  iamInstanceProfile?: string;
+  instanceMetadataHttpTokens?: string;
   instanceTypes?: Record<string, any>[];
   subnets?: Record<string, any>[];
   instanceProfiles?: Record<string, any>[];
   keyPairs?: Record<string, any>[];
+  autoPopulatedAmiId?: string | null;
   vpcId?: string;
   // Subnet ids explicitly defined on the infrastructure cluster. Empty when the
   // cluster relies on cluster-managed (auto-discovered) subnets.
@@ -37,10 +53,18 @@ interface Props {
 }
 
 const props = withDefaults(defineProps<Props>(), {
+  instanceType:     MACHINE_CONFIG_DEFAULTS.instanceType,
+  sshKeyName:       MACHINE_CONFIG_DEFAULTS.sshKeyName,
+  subnetId:         null,
+  publicIp:         MACHINE_CONFIG_DEFAULTS.publicIp,
+  amiId:            '',
+  iamInstanceProfile: MACHINE_CONFIG_DEFAULTS.iamInstanceProfile,
+  instanceMetadataHttpTokens: MACHINE_CONFIG_DEFAULTS.instanceMetadataOptions.httpTokens,
   instanceTypes:    () => [],
   subnets:          () => [],
   instanceProfiles: () => [],
   keyPairs:         () => [],
+  autoPopulatedAmiId: null,
   vpcId:            '',
   clusterSubnetIds: () => [],
   mode:             _CREATE,
@@ -54,6 +78,31 @@ const props = withDefaults(defineProps<Props>(), {
 
 const store = useStore();
 const { t } = useI18n(store);
+
+const modelInstanceType = computed({
+  get: () => props.instanceType || MACHINE_CONFIG_DEFAULTS.instanceType,
+  set: (val: string) => emit('update:instanceType', val),
+});
+
+const modelSshKeyName = computed({
+  get: () => props.sshKeyName || MACHINE_CONFIG_DEFAULTS.sshKeyName,
+  set: (val: string) => emit('update:sshKeyName', val),
+});
+
+const modelPublicIp = computed({
+  get: () => props.publicIp ?? MACHINE_CONFIG_DEFAULTS.publicIp,
+  set: (val: boolean) => emit('update:publicIp', val),
+});
+
+const modelIamInstanceProfile = computed({
+  get: () => props.iamInstanceProfile || MACHINE_CONFIG_DEFAULTS.iamInstanceProfile,
+  set: (val: string) => emit('update:iamInstanceProfile', val),
+});
+
+const modelInstanceMetadataHttpTokens = computed({
+  get: () => props.instanceMetadataHttpTokens || MACHINE_CONFIG_DEFAULTS.instanceMetadataOptions.httpTokens,
+  set: (val: string) => emit('update:instanceMetadataHttpTokens', val),
+});
 const httpTokensOptions = computed(() => [
   { label: t('capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.options.required'), value: HTTP_TOKENS_VALUES.REQUIRED },
   { label: t('capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.options.optional'), value: HTTP_TOKENS_VALUES.OPTIONAL },
@@ -104,14 +153,10 @@ const selectedSubnetId = computed({
       return SUBNET_NONE;
     }
 
-    return props.value.subnet?.id || SUBNET_NONE;
+    return props.subnetId || SUBNET_NONE;
   },
   set(val: string) {
-    if ( !props.value.subnet ) {
-      props.value.subnet = {};
-    }
-
-    props.value.subnet.id = (!props.vpcId || val === SUBNET_NONE) ? null : val;
+    emit('update:subnetId', (!props.vpcId || val === SUBNET_NONE) ? null : val);
   }
 });
 
@@ -133,7 +178,7 @@ const sshKeyOptions = computed(() => {
 });
 
 const selectedSubnetNotInCluster = computed(() => {
-  const subnetId = props.value.subnet?.id;
+  const subnetId = props.subnetId;
 
   if ( !subnetId ) {
     return false;
@@ -143,7 +188,7 @@ const selectedSubnetNotInCluster = computed(() => {
 });
 
 const subnetPublicIpError = computed(() => {
-  return selectedSubnetNotInCluster.value && !!props.value?.publicIp;
+  return selectedSubnetNotInCluster.value && !!props.publicIp;
 });
 
 const subnetBanner = computed(() => {
@@ -154,7 +199,7 @@ const subnetBanner = computed(() => {
   if ( subnetPublicIpError.value ) {
     return {
       color: 'error',
-      label: t('capa.machineConfig.instanceConfiguration.subnet.notInClusterError', { subnet: props.value.subnet?.id })
+      label: t('capa.machineConfig.instanceConfiguration.subnet.notInClusterError', { subnet: props.subnetId })
     };
   }
 
@@ -166,7 +211,7 @@ const subnetBanner = computed(() => {
 
 const amiDisplayId = computed({
   get() {
-    const amiId = props.value.ami?.id || '';
+    const amiId = props.amiId || '';
 
     if (props.isAmiAutoPopulated && amiId) {
       return `${ amiId } (${ t('capa.machineConfig.instanceConfiguration.advanced.machineImage.latestUbuntu') })`;
@@ -175,11 +220,12 @@ const amiDisplayId = computed({
     return amiId;
   },
   set(val: string) {
-    if (!props.value.ami) {
-      props.value.ami = {};
-    }
-    props.value.ami.id = val;
+    emit('update:amiId', val);
   },
+});
+
+const amiPlaceholder = computed(() => {
+  return props.autoPopulatedAmiId || '';
 });
 
 watch(subnetPublicIpError, () => {
@@ -197,7 +243,7 @@ watch(subnetPublicIpError, () => {
     <p>{{ t('capa.machineConfig.instanceConfiguration.description') }}</p>
 
     <LabeledSelect
-      v-model:value="value.instanceType"
+      v-model:value="modelInstanceType"
       :options="instanceTypeOptions"
       label-key="capa.machineConfig.instanceConfiguration.instanceType.label"
       option-key="value"
@@ -206,7 +252,7 @@ watch(subnetPublicIpError, () => {
       :loading="loadingInstanceTypes"
     />
     <LabeledSelect
-      v-model:value="value.sshKeyName"
+      v-model:value="modelSshKeyName"
       :options="sshKeyOptions"
       :mode="mode"
       label-key="capa.machineConfig.instanceConfiguration.sshKeyName.label"
@@ -229,7 +275,7 @@ watch(subnetPublicIpError, () => {
       :label="subnetBanner.label"
     />
     <Checkbox
-      v-model:value="value.publicIp"
+      v-model:value="modelPublicIp"
       :mode="mode"
       label-key="capa.machineConfig.instanceConfiguration.publicIp.label"
       :tooltip="t('capa.machineConfig.instanceConfiguration.publicIp.tooltip')"
@@ -245,11 +291,12 @@ watch(subnetPublicIpError, () => {
       <LabeledInput
         v-model:value="amiDisplayId"
         label-key="capa.machineConfig.instanceConfiguration.advanced.machineImage.label"
-        :placeholder="t('capa.machineConfig.instanceConfiguration.advanced.machineImage.placeholder')"
+        :placeholder="amiPlaceholder"
         :mode="mode"
+        required
       />
       <LabeledSelect
-        v-model:value="value.iamInstanceProfile"
+        v-model:value="modelIamInstanceProfile"
         :options="instanceProfileOptions"
         :taggable="true"
         :mode="mode"
@@ -258,7 +305,7 @@ watch(subnetPublicIpError, () => {
       />
       <div>
         <LabeledSelect
-          v-model:value="value.instanceMetadataOptions.httpTokens"
+          v-model:value="modelInstanceMetadataHttpTokens"
           :options="httpTokensOptions"
           label-key="capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.label"
           :mode="mode"

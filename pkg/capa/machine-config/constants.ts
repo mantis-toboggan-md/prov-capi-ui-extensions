@@ -43,3 +43,26 @@ export const UBUNTU_LTS_AMI_NAME_PATTERNS = [
   'ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*',
 ] as const;
 
+export const MACHINE_CONFIG_DEFAULTS = {
+  ami:                     {},
+  cloudInit:               { insecureSkipSecretsManager: true },
+  iamInstanceProfile:      '',
+  instanceMetadataOptions: { httpTokens: HTTP_TOKENS_VALUES.REQUIRED },
+  instanceType:            't3.medium',
+  marketType:              'OnDemand',
+  publicIp:                false,
+  rootVolume:              {
+    encrypted: false,
+    size:      32,
+    type:      'gp3',
+  },
+  sshKeyName:     '',
+  privateDnsName: { hostnameType: 'resource-name' },
+} as const;
+
+export const NON_ROOT_VOLUME_DEFAULT = {
+  deviceName: '',
+  type:       MACHINE_CONFIG_DEFAULTS.rootVolume.type,
+  size:       null as number | null,
+} as const;
+

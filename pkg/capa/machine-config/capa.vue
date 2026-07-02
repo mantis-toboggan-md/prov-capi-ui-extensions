@@ -1,39 +1,21 @@
 <script setup lang="ts">
 import {
-  computed, onMounted, ref, toRefs, watch, WritableComputedRef
+  computed, ref, toRefs, watch, WritableComputedRef
 } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { Banner } from '@components/Banner';
-import { HTTP_TOKENS_VALUES, UBUNTU_LTS_AMI_NAME_PATTERNS } from './constants';
+import {
+  MACHINE_CONFIG_DEFAULTS,
+  UBUNTU_LTS_AMI_NAME_PATTERNS
+} from './constants';
 import { stringify } from '@shell/utils/error';
 import { _CREATE } from '@shell/config/query-params';
 import InstanceConfigSection from './InstanceConfigSection.vue';
 import StorageSection from './StorageSection.vue';
 import AdvancedSection from './AdvancedSection.vue';
-import merge from 'lodash/merge';
 import debounce from 'lodash/debounce';
 defineOptions({ name: 'MachineConfigCapa' });
-
-const defaultConfig = {
-  spec: {
-    template: {
-      spec: {
-        cloudInit:               { insecureSkipSecretsManager: true },
-        iamInstanceProfile:      '',
-        instanceMetadataOptions: { httpTokens: HTTP_TOKENS_VALUES.REQUIRED },
-        instanceType:            't3.medium',
-        marketType:              'OnDemand',
-        publicIp:                false,
-        rootVolume:              {
-          encrypted: false, size: 32, type: 'gp3'
-        },
-        sshKeyName:     '',
-        privateDnsName: { hostnameType: 'resource-name' }
-      }
-    }
-  }
-};
 
 const emit = defineEmits(['validationChanged', 'update:value']);
 
@@ -80,22 +62,85 @@ const loadingSecurityGroups = ref(false);
 const loadingKmsKeys = ref(false);
 const autoPopulatedAmiId = ref<string | null>(null);
 
+function ensureTemplateSpec(): Record<string, any> {
+  const model = (value.value && typeof value.value === 'object') ? value.value : {};
+
+  if (model !== value.value) {
+    emit('update:value', model);
+  }
+
+  model.spec = model.spec || {};
+  model.spec.template = model.spec.template || {};
+  model.spec.template.spec = model.spec.template.spec || {};
+
+  return model.spec.template.spec;
+}
+
+const isNew = computed(() => {
+  // Pool is new if it has no creation timestamp (not yet created in Kubernetes)
+  return !value.value?.metadata?.creationTimestamp;
+});
+function setSpecAmiId(amiId: string | null) {
+  const templateSpec = ensureTemplateSpec();
+
+  templateSpec.ami = { ...(templateSpec.ami || {}), id: amiId };
+}
+
 const spec: WritableComputedRef<Record<string, any>> = computed({
   get() {
     const model = (value.value && typeof value.value === 'object') ? value.value : {};
 
-
+    if (model !== value.value) {
+      emit('update:value', model);
+    }
     model.spec = model.spec || {};
     model.spec.template = model.spec.template || {};
     model.spec.template.spec = model.spec.template.spec || {};
+    const s = model.spec.template.spec;
 
     // Important: never replace the whole model in the getter. Replacing it
     // causes v-model controls (e.g. publicIp checkbox) to snap back on render.
-    if (mode.value === _CREATE) {
-      model.spec.template.spec = merge({}, defaultConfig.spec.template.spec, model.spec.template.spec);
-    } else {
-      const s = model.spec.template.spec;
+    if (isNew.value) {
+      s.ami = s.ami || { ...MACHINE_CONFIG_DEFAULTS.ami };
+      s.cloudInit = s.cloudInit || { ...MACHINE_CONFIG_DEFAULTS.cloudInit };
+      s.iamInstanceProfile = s.iamInstanceProfile || MACHINE_CONFIG_DEFAULTS.iamInstanceProfile;
 
+      s.instanceMetadataOptions = s.instanceMetadataOptions || {};
+      if (!s.instanceMetadataOptions.httpTokens) {
+        s.instanceMetadataOptions.httpTokens = MACHINE_CONFIG_DEFAULTS.instanceMetadataOptions.httpTokens;
+      }
+
+      if (!s.instanceType) {
+        s.instanceType = MACHINE_CONFIG_DEFAULTS.instanceType;
+      }
+      if (!s.marketType) {
+        s.marketType = MACHINE_CONFIG_DEFAULTS.marketType;
+      }
+      if (s.publicIp === undefined) {
+        s.publicIp = MACHINE_CONFIG_DEFAULTS.publicIp;
+      }
+
+      s.rootVolume = s.rootVolume || {};
+      if (s.rootVolume.encrypted === undefined) {
+        s.rootVolume.encrypted = MACHINE_CONFIG_DEFAULTS.rootVolume.encrypted;
+      }
+      if (s.rootVolume.size === undefined) {
+        s.rootVolume.size = MACHINE_CONFIG_DEFAULTS.rootVolume.size;
+      }
+      if (!s.rootVolume.type) {
+        s.rootVolume.type = MACHINE_CONFIG_DEFAULTS.rootVolume.type;
+      }
+
+      s.sshKeyName = s.sshKeyName || MACHINE_CONFIG_DEFAULTS.sshKeyName;
+      s.privateDnsName = s.privateDnsName || { ...MACHINE_CONFIG_DEFAULTS.privateDnsName };
+      if (!Array.isArray(s.nonRootVolumes)) {
+        s.nonRootVolumes = [];
+      }
+      if (!Array.isArray(s.additionalSecurityGroups)) {
+        s.additionalSecurityGroups = [];
+      }
+      s.spotMarketOptions = s.spotMarketOptions || {};
+    } else {
       s.rootVolume = s.rootVolume || {};
       s.ami = s.ami || {};
       s.cloudInit = s.cloudInit || {};
@@ -116,6 +161,111 @@ const spec: WritableComputedRef<Record<string, any>> = computed({
     value.value.spec.template = value.value.spec.template || {};
     value.value.spec.template.spec = neu;
   },
+});
+
+// Emit update:value whenever spec changes (via mutations or replacement)
+watch(() => spec.value, () => {
+  emit('update:value', value.value);
+}, { deep: true });
+
+const instanceType = computed({
+  get: () => spec.value.instanceType,
+  set: (val: string) => { spec.value.instanceType = val; }
+});
+
+const sshKeyName = computed({
+  get: () => spec.value.sshKeyName,
+  set: (val: string) => { spec.value.sshKeyName = val; }
+});
+
+const subnetId = computed({
+  get: () => spec.value.subnet?.id || null,
+  set: (val: string | null) => { spec.value.subnet = { ...(spec.value.subnet || {}), id: val }; }
+});
+
+const publicIp = computed({
+  get: () => !!spec.value.publicIp,
+  set: (val: boolean) => { spec.value.publicIp = val; }
+});
+
+const amiId = computed({
+  get: () => spec.value.ami?.id || '',
+  set: (val: string) => { setSpecAmiId(val); }
+});
+
+const iamInstanceProfile = computed({
+  get: () => spec.value.iamInstanceProfile || '',
+  set: (val: string) => { spec.value.iamInstanceProfile = val; }
+});
+
+const instanceMetadataHttpTokens = computed({
+  get: () => spec.value.instanceMetadataOptions?.httpTokens || MACHINE_CONFIG_DEFAULTS.instanceMetadataOptions.httpTokens,
+  set: (val: string) => {
+    spec.value.instanceMetadataOptions = {
+      ...(spec.value.instanceMetadataOptions || {}),
+      httpTokens: val,
+    };
+  }
+});
+
+const rootVolumeSize = computed({
+  get: () => spec.value.rootVolume?.size,
+  set: (val: number) => { spec.value.rootVolume = { ...(spec.value.rootVolume || {}), size: val }; }
+});
+
+const rootVolumeType = computed({
+  get: () => spec.value.rootVolume?.type,
+  set: (val: string) => { spec.value.rootVolume = { ...(spec.value.rootVolume || {}), type: val }; }
+});
+
+const rootVolumeEncrypted = computed({
+  get: () => !!spec.value.rootVolume?.encrypted,
+  set: (val: boolean) => { spec.value.rootVolume = { ...(spec.value.rootVolume || {}), encrypted: val }; }
+});
+
+const rootVolumeEncryptionKey = computed({
+  get: () => spec.value.rootVolume?.encryptionKey || '',
+  set: (val: string) => { spec.value.rootVolume = { ...(spec.value.rootVolume || {}), encryptionKey: val }; }
+});
+
+const nonRootVolumes = computed({
+  get: () => spec.value.nonRootVolumes || [],
+  set: (val: Record<string, any>[]) => { spec.value.nonRootVolumes = val || []; }
+});
+
+const cloudInitInsecureSkipSecretsManager = computed({
+  get: () => !!spec.value.cloudInit?.insecureSkipSecretsManager,
+  set: (val: boolean) => {
+    spec.value.cloudInit = {
+      ...(spec.value.cloudInit || {}),
+      insecureSkipSecretsManager: val,
+    };
+  }
+});
+
+const additionalSecurityGroups = computed({
+  get: () => spec.value.additionalSecurityGroups || [],
+  set: (val: Array<{ id: string }>) => { spec.value.additionalSecurityGroups = val || []; }
+});
+
+const marketType = computed({
+  get: () => spec.value.marketType || MACHINE_CONFIG_DEFAULTS.marketType,
+  set: (val: string) => { spec.value.marketType = val; }
+});
+
+const spotMarketMaxPrice = computed({
+  get: () => spec.value.spotMarketOptions?.maxPrice || '',
+  set: (val: string) => {
+    spec.value.spotMarketOptions = {
+      ...(spec.value.spotMarketOptions || {}),
+      maxPrice: val,
+    };
+  }
+});
+
+const additionalTags = computed({
+  get: () => spec.value.additionalTags || {},
+  set: (val: Record<string, string>) => { spec.value.additionalTags = val || {}; }
 });
 
 const region = computed(() => infrastructureCluster.value?.spec?.region || null);
@@ -240,7 +390,7 @@ async function getKmsKeys() {
   if (!kmsClient.value || !region.value || !credentialId.value) {
     loadingKmsKeys.value = false;
     kmsKeys.value = [];
-    return [];
+    return;
   }
 
   try {
@@ -251,8 +401,6 @@ async function getKmsKeys() {
   } finally {
     loadingKmsKeys.value = false;
   }
-
-  return [];
 }
 
 async function getInstanceTypes() {
@@ -277,7 +425,7 @@ async function getInstanceTypes() {
 if (!spec.value.instanceMetadataOptions?.httpTokens) {
     spec.value.instanceMetadataOptions = {
      ...spec.value.instanceMetadataOptions,
-    httpTokens: HTTP_TOKENS_VALUES.REQUIRED,
+    httpTokens: MACHINE_CONFIG_DEFAULTS.instanceMetadataOptions.httpTokens,
   };
 }
 
@@ -294,34 +442,28 @@ const debouncedFetchAll = debounce(() => {
     getKmsKeys();
     getInstanceTypes();
     fetchLatestUbuntuAmi().then((amiId) => {
-      if (!amiId || mode.value !== _CREATE) {
+      if (!amiId) {
         return;
       }
+
       const currentAmi = spec.value?.ami?.id;
+
       // Only auto-fill when the field is empty or still holds the previous
       // auto-populated value (i.e. the user hasn't typed in a custom AMI).
       if (!currentAmi || currentAmi === autoPopulatedAmiId.value) {
-        spec.value.ami = { ...(spec.value.ami || {}), id: amiId };
+        setSpecAmiId(amiId);
         autoPopulatedAmiId.value = amiId;
       }
     }).catch((e) => {
       errors.value.push(t('capa.errors.fetchingAmi', { error: e }));
     });
   }, 1);
-onMounted(async() => {
-  if (mode.value === _CREATE) {
-    const valueWithDefaults = merge({}, defaultConfig, value.value);
-
-    emit('update:value', valueWithDefaults || {});
-  }
-});
-
 watch([
   () => region.value,
   () => credentialId.value,
 ], async([newRegion, newCredentialId], [oldRegion, oldCredentialId]) => {
     errors.value = []
-    const credentialChanged = !!newCredentialId && newCredentialId !== oldCredentialId;
+    const credentialChanged = !!oldCredentialId && !!newCredentialId && newCredentialId !== oldCredentialId;
 
     if(region.value && credentialId.value){
         try {
@@ -354,14 +496,14 @@ watch([
           errors.value.push(t('capa.errors.fetchingKmsClient', { error: e }));
         }
 
-        if(mode.value === _CREATE && (oldRegion && newRegion !== oldRegion || credentialChanged)){
+        if(isNew.value && (oldRegion && newRegion !== oldRegion || credentialChanged)){
           spec.value.subnet = { ...(spec.value.subnet || {}), id: null };
           spec.value.sshKeyName = '';
           spec.value.additionalSecurityGroups = [];
           spec.value.rootVolume = { ...(spec.value.rootVolume || {}), encryptionKey: '' };
           // Clear the AMI only when it hasn't been customized
           if (spec.value.ami?.id && spec.value.ami.id === autoPopulatedAmiId.value) {
-            spec.value.ami = { ...(spec.value.ami || {}), id: '' };
+            setSpecAmiId(null);
           }
         }
 
@@ -378,7 +520,7 @@ watch([
 
 <template>
   <div>
-    <div v-if="errors.length">
+    <div v-if="errors?.length">
       <div
         v-for="(err, idx) in errors"
         :key="idx"
@@ -390,7 +532,13 @@ watch([
       </div>
     </div>
       <InstanceConfigSection
-        v-model:value="spec"
+        v-model:instance-type="instanceType"
+        v-model:ssh-key-name="sshKeyName"
+        v-model:subnet-id="subnetId"
+        v-model:public-ip="publicIp"
+        v-model:ami-id="amiId"
+        v-model:iam-instance-profile="iamInstanceProfile"
+        v-model:instance-metadata-http-tokens="instanceMetadataHttpTokens"
         :instance-types="instanceTypes"
         :subnets="subnets"
         :instance-profiles="instanceProfiles"
@@ -403,16 +551,25 @@ watch([
         :loading-instance-profiles="loadingInstanceProfiles"
         :loading-subnets="loadingSubnets"
         :loading-instance-types="loadingInstanceTypes"
+        :auto-populated-ami-id="autoPopulatedAmiId"
         @validationChanged="$emit('validationChanged', $event)"
       />
       <StorageSection
-        v-model:value="spec"
+        v-model:root-volume-size="rootVolumeSize"
+        v-model:root-volume-type="rootVolumeType"
+        v-model:root-volume-encrypted="rootVolumeEncrypted"
+        v-model:root-volume-encryption-key="rootVolumeEncryptionKey"
+        v-model:non-root-volumes="nonRootVolumes"
         :mode="mode"
         :kms-keys="kmsKeys"
         :loading-kms-keys="loadingKmsKeys"
       />
       <AdvancedSection
-        v-model:value="spec"
+        v-model:cloud-init-insecure-skip-secrets-manager="cloudInitInsecureSkipSecretsManager"
+        v-model:additional-security-groups="additionalSecurityGroups"
+        v-model:market-type="marketType"
+        v-model:spot-market-max-price="spotMarketMaxPrice"
+        v-model:additional-tags="additionalTags"
         :security-groups="securityGroups"
         :loading-security-groups="loadingSecurityGroups"
         :vpc-id="vpcId"
