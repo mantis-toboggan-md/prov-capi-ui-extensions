@@ -284,18 +284,8 @@ const clusterSubnetIds = computed(() => {
     .filter((id: string | undefined): id is string => !!id);
 });
 
-const availableSubnets = computed(() => {
-  return (subnets.value || []).filter((subnet: { SubnetId?: string }) => {
-    return !!subnet.SubnetId && clusterSubnetIds.value.includes(subnet.SubnetId);
-  });
-});
-
-watch(clusterSubnetIds, (ids) => {
-  if (!subnetId.value) {
-    return;
-  }
-
-  if (!ids.includes(subnetId.value)) {
+watch(vpcId, (newVpcId, oldVpcId) => {
+  if (newVpcId !== oldVpcId) {
     subnetId.value = null;
   }
 });
@@ -561,7 +551,7 @@ watch([
         v-model:iam-instance-profile="iamInstanceProfile"
         v-model:instance-metadata-http-tokens="instanceMetadataHttpTokens"
         :instance-types="instanceTypes"
-        :subnets="availableSubnets"
+        :subnets="subnets"
         :instance-profiles="instanceProfiles"
         :key-pairs="sshKeys"
         :vpc-id="vpcId"
