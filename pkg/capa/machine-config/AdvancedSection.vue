@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { computed, watch } from 'vue';
 import { useStore } from 'vuex';
 import { useI18n } from '@shell/composables/useI18n';
 import { RcSection } from '@components/RcSection';
@@ -8,7 +8,7 @@ import { RadioGroup } from '@components/Form/Radio';
 import LabeledSelect from '@shell/components/form/LabeledSelect';
 import KeyValue from '@shell/components/form/KeyValue';
 import UnitInput from '@shell/components/form/UnitInput';
-import { MACHINE_CONFIG_DEFAULTS, SECURITY_GROUP_OPTIONS } from './constants';
+import { MACHINE_CONFIG_DEFAULTS } from './constants';
 import { _CREATE } from '@shell/config/query-params';
 
 defineOptions({ name: 'AdvancedSection' });
@@ -58,23 +58,23 @@ const modelMarketType = computed({
   set: (val: string) => emit('update:marketType', val),
 });
 
-const securityGroupMode = ref((props.additionalSecurityGroups || []).length ? 'replace' : 'merge');
-
-const securityGroupOptions = computed(() => SECURITY_GROUP_OPTIONS
-  .map((o) => ({
-    label: t(o.labelKey),
-    value: o.value,
-  })));
+watch(modelMarketType, (val) => {
+  if (val !== 'Spot') {
+    emit('update:spotMarketMaxPrice', undefined);
+  }
+});
 
 const existingSecurityGroupOptions = computed(() => {
   const groups = props.vpcId
     ? (props.securityGroups || []).filter((sg: Record<string, any>) => sg.VpcId === props.vpcId)
     : (props.securityGroups || []);
 
-  return groups.map((sg: Record<string, any>) => ({
-    label: sg.GroupName ? `${ sg.GroupName } (${ sg.GroupId })` : sg.GroupId,
-    value: sg.GroupId,
-  }));
+  return groups
+    .map((sg: Record<string, any>) => ({
+      label: sg.GroupName ? `${ sg.GroupName } (${ sg.GroupId })` : sg.GroupId,
+      value: sg.GroupId,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 });
 
 const selectedSecurityGroupIds = computed({
@@ -92,7 +92,7 @@ const spotMaxPrice = computed({
   },
   set(maxPrice: string | number | null | undefined) {
     const normalized = (maxPrice === null || maxPrice === undefined || maxPrice === '') ? undefined : String(maxPrice);
-    emit('update:spotMarketMaxPrice', normalized as string);
+    emit('update:spotMarketMaxPrice', normalized);
   },
 });
 
@@ -104,13 +104,6 @@ const tags = computed({
     emit('update:additionalTags', additionalTags);
   },
 });
-
-function onSecurityGroupModeChange(mode: string) {
-  securityGroupMode.value = mode;
-  if ( mode !== 'replace' ) {
-    emit('update:additionalSecurityGroups', []);
-  }
-}
 </script>
 
 <template>
@@ -126,32 +119,22 @@ function onSecurityGroupModeChange(mode: string) {
       <Checkbox
         v-model:value="modelCloudInitInsecureSkipSecretsManager"
         :label="t('capa.machineConfig.advanced.cloudInit.disable.label')"
-        class="mt-10"
+        class="mmt-6"
         :mode="mode"
       />
     </div>
-
-    <RadioGroup
-      v-model:value="securityGroupMode"
-      name="security-group"
-      :options="securityGroupOptions"
-      label-key="capa.machineConfig.advanced.securityGroup.label"
-      class="mt-20 mb-10"
-      :disabled="!vpcId"
-      :mode="mode"
-      @update:value="onSecurityGroupModeChange"
-    />
-    <LabeledSelect
-      v-if="securityGroupMode === 'replace'"
-      v-model:value="selectedSecurityGroupIds"
-      :options="existingSecurityGroupOptions"
-      :multiple="true"
-      :mode="mode"
-      :label="t('capa.machineConfig.advanced.securityGroup.existingLabel')"
-      class="mb-10"
-      :loading="loadingSecurityGroups"
-    />
-
+    <div class="span-8">
+      <LabeledSelect
+        v-model:value="selectedSecurityGroupIds"
+        :options="existingSecurityGroupOptions"
+        :multiple="true"
+        :mode="mode"
+        :label="t('capa.machineConfig.advanced.securityGroup.label')"
+        class="mmb-4"
+        :loading="loadingSecurityGroups"
+        :disabled="!vpcId"
+      />
+    </div>
     <RcSection
       :title="t('capa.machineConfig.advanced.marketType.title')"
       :expandable="true"
@@ -170,13 +153,15 @@ function onSecurityGroupModeChange(mode: string) {
         ]"
       />
       <div v-if="modelMarketType === 'Spot'">
-        <UnitInput
-          v-model:value="spotMaxPrice"
-          label-key="capa.machineConfig.advanced.marketType.price.label"
-          suffix="USD/h"
-          class="mb-10"
-          :mode="mode"
-        />
+        <div class="span-4">
+          <UnitInput
+            v-model:value="spotMaxPrice"
+            label-key="capa.machineConfig.advanced.marketType.price.label"
+            suffix="USD/h"
+            class="mmb-4"
+            :mode="mode"
+          />
+        </div>
         <p>{{ t('capa.machineConfig.advanced.marketType.price.description') }}</p>
       </div>
     </RcSection>

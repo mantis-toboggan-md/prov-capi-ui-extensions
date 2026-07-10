@@ -255,11 +255,16 @@ const marketType = computed({
 
 const spotMarketMaxPrice = computed({
   get: () => spec.value.spotMarketOptions?.maxPrice || '',
-  set: (val: string) => {
-    spec.value.spotMarketOptions = {
-      ...(spec.value.spotMarketOptions || {}),
-      maxPrice: val,
-    };
+  set: (val: string | undefined) => {
+    const current = { ...(spec.value.spotMarketOptions || {}) };
+
+    if (val === undefined || val === '') {
+      delete current.maxPrice;
+    } else {
+      current.maxPrice = val;
+    }
+
+    spec.value.spotMarketOptions = current;
   }
 });
 
@@ -277,6 +282,22 @@ const clusterSubnetIds = computed(() => {
   return (infrastructureCluster.value?.spec?.network?.subnets || [])
     .map((subnet: { id?: string }) => subnet.id)
     .filter((id: string | undefined): id is string => !!id);
+});
+
+const availableSubnets = computed(() => {
+  return (subnets.value || []).filter((subnet: { SubnetId?: string }) => {
+    return !!subnet.SubnetId && clusterSubnetIds.value.includes(subnet.SubnetId);
+  });
+});
+
+watch(clusterSubnetIds, (ids) => {
+  if (!subnetId.value) {
+    return;
+  }
+
+  if (!ids.includes(subnetId.value)) {
+    subnetId.value = null;
+  }
 });
 
 // Look up the most recent Canonical Ubuntu LTS AMI available in the current region
@@ -437,7 +458,7 @@ const debouncedFetchAll = debounce(() => {
 
     getSshKeys();
     getInstanceProfiles();
-    getSubnets();
+  getSubnets();
     getSecurityGroups();
     getKmsKeys();
     getInstanceTypes();
@@ -540,7 +561,7 @@ watch([
         v-model:iam-instance-profile="iamInstanceProfile"
         v-model:instance-metadata-http-tokens="instanceMetadataHttpTokens"
         :instance-types="instanceTypes"
-        :subnets="subnets"
+        :subnets="availableSubnets"
         :instance-profiles="instanceProfiles"
         :key-pairs="sshKeys"
         :vpc-id="vpcId"

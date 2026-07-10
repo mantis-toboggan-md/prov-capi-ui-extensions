@@ -107,8 +107,6 @@ capa:
       subnet:
         label: Subnet
         none: 'None (use a cluster-managed subnet)'
-        notInClusterWarning: 'You can use a subnet not listed in the infrastructure cluster, unless you are assigning a public IP to this node pool'
-        notInClusterError: 'Subnet {subnet} is not part of the infrastructure cluster and cannot be used while a public IP is requested. Disable the public IP or choose a subnet defined on the infrastructure cluster.'
       publicIp:
         label: Assign a public IP
         tooltip: 'Assign a public IP address to nodes in this pool. A public IP can only be used with subnets defined on the infrastructure cluster.'
@@ -158,7 +156,7 @@ capa:
         disable:
           label: Skip secrets manager (insecure)
       securityGroup:
-        label: Security group
+        label: Additional security groups
         existingLabel: Security groups
         options:
           standard: "Standard: Automatically create and use a 'rancher-nodes' security group"

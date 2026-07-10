@@ -6,7 +6,6 @@ import { RcSection } from '@components/RcSection';
 import LabeledSelect from '@shell/components/form/LabeledSelect';
 import { LabeledInput } from '@components/Form/LabeledInput';
 import { Checkbox } from '@components/Form/Checkbox';
-import { Banner } from '@components/Banner';
 import { getSubnetDisplayName } from '@shell/utils/aws';
 import { HTTP_TOKENS_VALUES, MACHINE_CONFIG_DEFAULTS } from './constants';
 import { _CREATE } from '@shell/config/query-params';
@@ -132,13 +131,24 @@ const instanceTypeOptions = computed(() => {
   return out;
 });
 
+function getSubnetOption(subnet: Record<string, any>) {
+  const subnetId = subnet.SubnetId || subnet.id;
+
+  if (!subnetId) {
+    return null;
+  }
+
+  return {
+    label: subnet.SubnetId ? getSubnetDisplayName(subnet as any) : subnetId,
+    value: subnetId,
+  };
+}
+
 const subnetOptions = computed(() => {
   const options = (props.subnets || [])
-    .filter((subnet: Record<string, any>) => !!props.vpcId && subnet.VpcId === props.vpcId)
-    .map((subnet: Record<string, any>) => ({
-      label: getSubnetDisplayName(subnet as any),
-      value: subnet['SubnetId'],
-    }))
+    .filter((subnet: Record<string, any>) => !subnet.VpcId || (!!props.vpcId && subnet.VpcId === props.vpcId))
+    .map((subnet: Record<string, any>) => getSubnetOption(subnet))
+    .filter((option): option is { label: string; value: string } => !!option)
     .sort((a: { label: string }, b: { label: string }) => a.label.localeCompare(b.label));
 
   return [
@@ -191,24 +201,6 @@ const subnetPublicIpError = computed(() => {
   return selectedSubnetNotInCluster.value && !!props.publicIp;
 });
 
-const subnetBanner = computed(() => {
-  if ( !selectedSubnetNotInCluster.value ) {
-    return null;
-  }
-
-  if ( subnetPublicIpError.value ) {
-    return {
-      color: 'error',
-      label: t('capa.machineConfig.instanceConfiguration.subnet.notInClusterError', { subnet: props.subnetId })
-    };
-  }
-
-  return {
-    color: 'warning',
-    label: t('capa.machineConfig.instanceConfiguration.subnet.notInClusterWarning')
-  };
-});
-
 const amiDisplayId = computed({
   get() {
     const amiId = props.amiId || '';
@@ -241,39 +233,47 @@ watch(subnetPublicIpError, () => {
     type="primary"
   >
     <p>{{ t('capa.machineConfig.instanceConfiguration.description') }}</p>
-
-    <LabeledSelect
-      v-model:value="modelInstanceType"
-      :options="instanceTypeOptions"
-      label-key="capa.machineConfig.instanceConfiguration.instanceType.label"
-      option-key="value"
-      option-label="label"
-      :mode="mode"
-      :loading="loadingInstanceTypes"
-    />
-    <LabeledSelect
-      v-model:value="modelSshKeyName"
-      :options="sshKeyOptions"
-      :mode="mode"
-      label-key="capa.machineConfig.instanceConfiguration.sshKeyName.label"
-      :sub-label="t('capa.machineConfig.instanceConfiguration.sshKeyName.description')"
-      required
-      :loading="loadingSshKeys"
-    />
-    <LabeledSelect
-      v-model:value="selectedSubnetId"
-      :options="subnetOptions"
-      label-key="capa.machineConfig.instanceConfiguration.subnet.label"
-      option-key="value"
-      option-label="label"
-      :mode="mode"
-      :loading="loadingSubnets"
-    />
-    <Banner
-      v-if="subnetBanner"
-      :color="subnetBanner.color"
-      :label="subnetBanner.label"
-    />
+    <div class="span-8">
+      <LabeledSelect
+        v-model:value="modelInstanceType"
+        :options="instanceTypeOptions"
+        label-key="capa.machineConfig.instanceConfiguration.instanceType.label"
+        option-key="value"
+        option-label="label"
+        :mode="mode"
+        :loading="loadingInstanceTypes"
+      />
+    </div>
+    <div class="span-8">
+      <LabeledSelect
+        v-model:value="modelSshKeyName"
+        :options="sshKeyOptions"
+        :mode="mode"
+        label-key="capa.machineConfig.instanceConfiguration.sshKeyName.label"
+        :sub-label="t('capa.machineConfig.instanceConfiguration.sshKeyName.description')"
+        required
+        :loading="loadingSshKeys"
+      />
+    </div>
+    <div class="span-8">
+      <LabeledInput
+        v-model:value="amiDisplayId"
+        label-key="capa.machineConfig.instanceConfiguration.advanced.machineImage.label"
+        :placeholder="amiPlaceholder"
+        :mode="mode"
+        required
+      />
+    </div>
+    <div class="span-8">
+      <LabeledSelect
+        v-model:value="modelIamInstanceProfile"
+        :options="instanceProfileOptions"
+        :taggable="true"
+        :mode="mode"
+        :loading="loadingInstanceProfiles"
+        label-key="capa.machineConfig.instanceConfiguration.advanced.iamInstanceProfileName.label"
+      />
+    </div>
     <Checkbox
       v-model:value="modelPublicIp"
       :mode="mode"
@@ -288,29 +288,27 @@ watch(subnetPublicIpError, () => {
       type="secondary"
       :expanded="false"
     >
-      <LabeledInput
-        v-model:value="amiDisplayId"
-        label-key="capa.machineConfig.instanceConfiguration.advanced.machineImage.label"
-        :placeholder="amiPlaceholder"
-        :mode="mode"
-        required
-      />
-      <LabeledSelect
-        v-model:value="modelIamInstanceProfile"
-        :options="instanceProfileOptions"
-        :taggable="true"
-        :mode="mode"
-        :loading="loadingInstanceProfiles"
-        label-key="capa.machineConfig.instanceConfiguration.advanced.iamInstanceProfileName.label"
-      />
-      <div>
+      <div class="span-8">
         <LabeledSelect
-          v-model:value="modelInstanceMetadataHttpTokens"
-          :options="httpTokensOptions"
-          label-key="capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.label"
+          v-model:value="selectedSubnetId"
+          :options="subnetOptions"
+          label-key="capa.machineConfig.instanceConfiguration.subnet.label"
+          option-key="value"
+          option-label="label"
           :mode="mode"
+          :loading="loadingSubnets"
         />
-        <p class="text-muted text-small mt-5 mb-0">
+      </div>
+      <div>
+        <div class="span-4">
+          <LabeledSelect
+            v-model:value="modelInstanceMetadataHttpTokens"
+            :options="httpTokensOptions"
+            label-key="capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.label"
+            :mode="mode"
+          />
+        </div>
+        <p class="text-muted text-small mmt-2 mb-0">
           {{ t('capa.machineConfig.instanceConfiguration.advanced.instanceMetadataOptions.httpTokens.description') }}
         </p>
       </div>

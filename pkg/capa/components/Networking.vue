@@ -304,7 +304,7 @@ watch(provClusterCNI, (newCni = '', oldCni = '') => {
     mode="with-header"
     :expandable="true"
   >
-    <div class="mb-10 span-6">
+    <div class="span-6 mmb-4">
       <LabeledSelect
         :value="vpcId"
         :label="t('capa.clusterConfig.network.vpc.label')"
@@ -318,7 +318,7 @@ watch(provClusterCNI, (newCni = '', oldCni = '') => {
         @update:value="$emit('update:vpcId', $event)"
       />
     </div>
-    <div class="mb-20 span-6">
+    <div class="span-6 mmb-6">
       <LabeledSelect
         v-model:value="selectedSubnetIds"
         :label="t('capa.clusterConfig.network.subnets.label')"
@@ -334,7 +334,7 @@ watch(provClusterCNI, (newCni = '', oldCni = '') => {
   </RcSection>
   <div
     v-else
-    class="row mb-20"
+    class="row mmb-4"
   >
     <div class="col span-6">
       <LabeledInput
@@ -367,6 +367,7 @@ watch(provClusterCNI, (newCni = '', oldCni = '') => {
     <Banner
       color="warning"
       @click="goToBasicsCniSelect"
+      class="m-0"
     >
       <span v-clean-html="t('capa.clusterConfig.network.cniProviderBanner', { cni: provClusterCNI }, true)" />
     </Banner>
@@ -411,7 +412,7 @@ watch(provClusterCNI, (newCni = '', oldCni = '') => {
       <Banner
         v-else
         color="info"
-        class="override-info-banner"
+        class="m-0"
       >
         {{ t('capa.clusterConfig.network.overrideBanners.controlPlaneOverridden') }}
       </Banner>
@@ -438,7 +439,7 @@ watch(provClusterCNI, (newCni = '', oldCni = '') => {
       <Banner
         v-else
         color="info"
-        class="override-info-banner"
+        class="m-0"
       >
         {{ t('capa.clusterConfig.network.overrideBanners.nodeOverridden') }}
       </Banner>
@@ -453,14 +454,14 @@ watch(provClusterCNI, (newCni = '', oldCni = '') => {
       <Banner
         v-if="!allowAdditionalNodeRules && allowCNIRules"
         color="info"
-        class="override-info-banner"
+        class="m-0"
       >
         {{ t('capa.clusterConfig.network.overrideBanners.nodeOverriddenCni') }}
       </Banner>
       <Banner
         v-if="!allowAdditionalCPRules && allowCNIRules"
         color="info"
-        class="override-info-banner"
+        class="m-0"
       >
         {{ t('capa.clusterConfig.network.overrideBanners.controlPlaneOverriddenCni') }}
       </Banner>
@@ -479,16 +480,10 @@ watch(provClusterCNI, (newCni = '', oldCni = '') => {
       <Banner
         v-else
         color="info"
-        class="override-info-banner"
+        class="m-0"
       >
         {{ t('capa.clusterConfig.network.overrideBanners.bothOverridden') }}
       </Banner>
     </RcSection>
   </RcSection>
 </template>
-
-<style lang="scss" scoped>
-  .banner.override-info-banner {
-    margin: 0px;
-  }
-</style>

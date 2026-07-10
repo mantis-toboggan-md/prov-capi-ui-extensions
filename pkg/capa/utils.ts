@@ -9,24 +9,35 @@ import {
 import * as AWS from '@shell/types/aws-sdk';
 import { CAPA } from './labels-annotations';
 
-const ADDITIONAL_MANIFEST = `apiVersion: helm.cattle.io/v1
-kind: HelmChart
-metadata:
-  name: aws-cloud-controller-manager
-  namespace: kube-system
-spec:
-  chart: aws-cloud-controller-manager
-  repo: https://kubernetes.github.io/cloud-provider-aws
-  targetNamespace: kube-system
-  bootstrap: true
-  valuesContent: |-
-    hostNetworking: true
-    nodeSelector:
-      node-role.kubernetes.io/control-plane: "true"
-    args:
-      - --configure-cloud-routes=false
-      - --v=5
-      - --cloud-provider=aws`;
+const ADDITIONAL_MANIFEST = `additionalManifest: |-
+      apiVersion: helm.cattle.io/v1
+      kind: HelmChart
+      metadata:
+        name: aws-cloud-controller-manager
+        namespace: kube-system
+      spec:
+        chart: aws-cloud-controller-manager
+        repo: https://kubernetes.github.io/cloud-provider-aws
+        targetNamespace: kube-system
+        bootstrap: true
+        valuesContent: |-
+          hostNetworking: true
+          nodeSelector:
+            node-role.kubernetes.io/control-plane: "true"
+          args:
+            - --configure-cloud-routes=false
+            - --v=5
+            - --cloud-provider=aws
+          tolerations:
+                - key: node.cloudprovider.kubernetes.io/uninitialized
+                  value: "true"
+                  effect: NoSchedule
+                - key: node-role.kubernetes.io/master
+                  effect: NoSchedule
+                - key: node-role.kubernetes.io/control-plane
+                  effect: NoSchedule
+                - key: node-role.kubernetes.io/etcd
+                  effect: NoExecute`;
 
 const MACHINE_SELECTOR_CONFIG = [
   {

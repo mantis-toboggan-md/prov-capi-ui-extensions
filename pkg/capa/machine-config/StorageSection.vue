@@ -91,21 +91,25 @@ const additionalVolumeTypeOptions = computed(() => VOLUME_TYPE_OPTIONS);
     <p>{{ t('capa.machineConfig.storage.description') }}</p>
 
     <div class="row">
-      <UnitInput
-        v-model:value="modelRootVolumeSize"
-        label-key="capa.machineConfig.storage.rootVolume.size.label"
-        suffix="GiB"
-        class="mr-10"
-        required
-        :mode="mode"
-      />
-      <LabeledSelect
-        v-model:value="modelRootVolumeType"
-        :options="rootVolumeTypeOptions"
-        label-key="capa.machineConfig.storage.rootVolume.type.label"
-        required
-        :mode="mode"
-      />
+      <div class="span-4 mmr-4">
+        <UnitInput
+          v-model:value="modelRootVolumeSize"
+          label-key="capa.machineConfig.storage.rootVolume.size.label"
+          suffix="GiB"
+          class="mmr-4"
+          required
+          :mode="mode"
+        />
+      </div>
+      <div class="span-4">
+        <LabeledSelect
+          v-model:value="modelRootVolumeType"
+          :options="rootVolumeTypeOptions"
+          label-key="capa.machineConfig.storage.rootVolume.type.label"
+          required
+          :mode="mode"
+        />
+      </div>
     </div>
 
     <Checkbox
@@ -113,17 +117,18 @@ const additionalVolumeTypeOptions = computed(() => VOLUME_TYPE_OPTIONS);
       :mode="mode"
       :label="t('capa.machineConfig.storage.rootVolume.encrypted.label')"
     />
-    <LabeledSelect
-      v-if="modelRootVolumeEncrypted"
-      v-model:value="modelRootVolumeEncryptionKey"
-      :options="kmsKeyOptions"
-      label-key="capa.machineConfig.storage.rootVolume.encryptionKey.label"
-      placeholder-key="capa.machineConfig.storage.rootVolume.encryptionKey.placeholder"
-      required
-      :mode="mode"
-      :loading="loadingKmsKeys"
-    />
-
+    <div class="span-8">
+      <LabeledSelect
+        v-if="modelRootVolumeEncrypted"
+        v-model:value="modelRootVolumeEncryptionKey"
+        :options="kmsKeyOptions"
+        label-key="capa.machineConfig.storage.rootVolume.encryptionKey.label"
+        placeholder-key="capa.machineConfig.storage.rootVolume.encryptionKey.placeholder"
+        required
+        :mode="mode"
+        :loading="loadingKmsKeys"
+      />
+    </div>
     <RcSection
       :title="t('capa.machineConfig.storage.advanced.title')"
       :expandable="true"
@@ -137,7 +142,7 @@ const additionalVolumeTypeOptions = computed(() => VOLUME_TYPE_OPTIONS);
         :default-add-value="NON_ROOT_VOLUME_DEFAULT"
         :add-label="t('capa.machineConfig.storage.advanced.additionalVolumes.add')"
         :show-header="true"
-        class="mb-10 additional-volumes-list"
+        class="mmb-4 additional-volumes-list"
         :mode="mode"
       >
         <template #columns="{ row, queueUpdate }">
