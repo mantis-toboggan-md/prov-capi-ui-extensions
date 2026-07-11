@@ -430,12 +430,13 @@ watch([
 </script>
 
 <template>
-  <div class="mb-20">
-    <Banner :label="e" :key="e" v-for="e in credentialErrors" color="error"/>
+  <div class="mmb-6">
+    <Banner :label="e" :key="e" v-for="e in credentialErrors" color="error" class="m-0"/>
     <Banner
       v-if="credentialId && showIdentityError"
       color="error"
       :label="t('capa.errors.missingIdentityRef', { annotation: CAPA.IDENTITY_REF }, true)"
+      class="m-0"
     />
     <RcSection
       :title="t('capa.clusterConfig.title')"
@@ -465,7 +466,7 @@ watch([
             />
           </div>
         </div>
-        <div class="row mb-20">
+        <div class="row mmb-6">
           <div class="span-4">
             <LabeledSelect
               v-model:value="sshKeyName"

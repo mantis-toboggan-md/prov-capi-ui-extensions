@@ -255,11 +255,16 @@ const marketType = computed({
 
 const spotMarketMaxPrice = computed({
   get: () => spec.value.spotMarketOptions?.maxPrice || '',
-  set: (val: string) => {
-    spec.value.spotMarketOptions = {
-      ...(spec.value.spotMarketOptions || {}),
-      maxPrice: val,
-    };
+  set: (val: string | undefined) => {
+    const current = { ...(spec.value.spotMarketOptions || {}) };
+
+    if (val === undefined || val === '') {
+      delete current.maxPrice;
+    } else {
+      current.maxPrice = val;
+    }
+
+    spec.value.spotMarketOptions = current;
   }
 });
 
@@ -277,6 +282,12 @@ const clusterSubnetIds = computed(() => {
   return (infrastructureCluster.value?.spec?.network?.subnets || [])
     .map((subnet: { id?: string }) => subnet.id)
     .filter((id: string | undefined): id is string => !!id);
+});
+
+watch(vpcId, (newVpcId, oldVpcId) => {
+  if (newVpcId !== oldVpcId) {
+    subnetId.value = null;
+  }
 });
 
 // Look up the most recent Canonical Ubuntu LTS AMI available in the current region
@@ -437,7 +448,7 @@ const debouncedFetchAll = debounce(() => {
 
     getSshKeys();
     getInstanceProfiles();
-    getSubnets();
+  getSubnets();
     getSecurityGroups();
     getKmsKeys();
     getInstanceTypes();

@@ -222,7 +222,7 @@ function validateIpv6CidrString(cidrBlockString = '') {
     <RcSection
       v-for="(rule, index) in localValue"
       :key="index"
-      class="mb-20"
+      class="mmb-6"
       type="secondary"
       mode="with-header"
       :expandable="false"
