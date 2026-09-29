@@ -1,12 +1,18 @@
 import { importTypes } from '@rancher/auto-import';
-import { IExtension, ModelExtensionConstructor, EditableRelatedResourcesLocation, EditableRelatedResource } from '@shell/core/types';
+import {
+  IExtension, ModelExtensionConstructor, EditableRelatedResourcesLocation, EditableRelatedResource, EditableRelatedResourceSave
+} from '@shell/core/types';
+import { hasUnsavedMachinePool, machinePoolStoreFor, saveMachineConfigYaml } from '@shell/utils/machine-pools';
+import { keyForResource } from '@shell/utils/resource-key';
 import { CAPAProvisioner, hasCAPAInfrastructure } from './provisioner';
+import { saveMachinePoolConfigYaml } from './utils';
 import { CAPARKE2Cluster } from './model-extension/provisioning.cattle.io.cluster';
 import { CAPI } from '@shell/config/types';
-import { AWS_CLUSTER_SCHEMA, AWS_MACHINE_TEMPLATE_SCHEMA } from './types/capa';
+import { AWS_CLUSTER_SCHEMA, AWS_IDENTITY_GROUP, AWS_MACHINE_TEMPLATE_SCHEMA } from './types/capa';
 
 export const MACHINE_TEMPLATE_GROUP = 'capa.resourceGraph.groups.machineTemplates';
 export const INFRASTRUCTURE_CLUSTER_GROUP = 'capa.resourceGraph.groups.infrastructureCluster';
+export const IDENTITY_REFERENCE_GROUP = 'capa.resourceGraph.groups.identityReference';
 
 /**
  * Fetch a resource from the management store, logging and swallowing any failure so that one
@@ -19,6 +25,40 @@ async function findOrNull(cluster: any, type: string, id: string): Promise<any |
 
       return null;
     });
+}
+
+/**
+ * Saves an AWS machine template edited as YAML
+ *
+ * As in the cluster form, the template is replaced rather than updated, and the pool in the
+ * cluster's YAML is pointed at the replacement. A replacement made by an earlier save is only
+ * referenced by the unsaved cluster YAML, so it is removed once replaced again. The template the
+ * saved cluster references is kept
+ */
+function machineTemplateSave(cluster: any): EditableRelatedResourceSave {
+  const context = { ...machinePoolStoreFor(cluster), t: cluster.$rootGetters['i18n/t'] };
+  const createdKeys = new Set<string>();
+
+  return async(ctx) => {
+    const saved = await saveMachineConfigYaml(ctx, context, async(entry, clusterName) => {
+      await saveMachinePoolConfigYaml(entry, clusterName, context);
+    });
+
+    const replacedKey = keyForResource(ctx.resource);
+    const savedKey = keyForResource(saved);
+
+    if (savedKey !== replacedKey) {
+      if (createdKeys.has(replacedKey)) {
+        await ctx.resource.remove().catch((e: any) => {
+          console.warn('capa: failed to remove replaced machine template', e); // eslint-disable-line no-console
+        });
+      }
+
+      createdKeys.add(savedKey);
+    }
+
+    return saved;
+  };
 }
 
 /**
@@ -38,18 +78,24 @@ async function fetchMachineTemplates(cluster: any): Promise<EditableRelatedResou
     `${ cluster.metadata?.namespace }/${ name }`
   )));
 
+  const save = machineTemplateSave(cluster);
+
   return templates
     .filter((template) => !!template)
     .map((resource) => ({
       resource,
       groupKey: MACHINE_TEMPLATE_GROUP,
+      save,
+      // a save creates a replacement template, which only the unsaved cluster yaml references
+      banner:   (ctx) => (hasUnsavedMachinePool(ctx) ? { color: 'error', labelKey: 'capa.resourceGraph.banners.unsavedMachineTemplate' } : null),
     }));
 }
 
 /**
  * The AWSCluster the provisioning cluster's `infrastructureRef` points at
  *
- * Its own model contributes the identity it references, so the shell expands the tree from here
+ * The identity it references is contributed by the AWSCluster registration below, which the shell
+ * applies when it expands the tree from here
  */
 async function fetchInfrastructureCluster(cluster: any): Promise<EditableRelatedResource[]> {
   const ref = cluster.spec?.rkeConfig?.infrastructureRef;
@@ -65,6 +111,34 @@ async function fetchInfrastructureCluster(cluster: any): Promise<EditableRelated
     resource: infrastructureCluster,
     groupKey: INFRASTRUCTURE_CLUSTER_GROUP,
   }] : [];
+}
+
+/**
+ * The identity an AWSCluster's `identityRef` points at, which holds the credentials CAPA uses to
+ * talk to AWS. The identity types are all cluster scoped, so the reference is a bare name
+ */
+async function fetchIdentityReference(awsCluster: any): Promise<EditableRelatedResource[]> {
+  const ref = awsCluster.spec?.identityRef;
+
+  if (!ref?.kind || !ref?.name) {
+    return [];
+  }
+
+  const identity = await findOrNull(awsCluster, `${ AWS_IDENTITY_GROUP }.${ ref.kind.toLowerCase() }`, ref.name);
+
+  return identity ? [{
+    resource: identity,
+    groupKey: IDENTITY_REFERENCE_GROUP,
+  }] : [];
+}
+
+/**
+ * `ours` added to `relatedResources`, replacing any entry for the same resource
+ */
+function mergeRelatedResources(relatedResources: EditableRelatedResource[], ours: EditableRelatedResource[]): EditableRelatedResource[] {
+  const ourKeys = new Set(ours.map((entry) => keyForResource(entry.resource)).filter(Boolean));
+
+  return [...relatedResources.filter((entry) => !ourKeys.has(keyForResource(entry.resource))), ...ours];
 }
 
 // Init the package
@@ -96,10 +170,7 @@ export default function(plugin: IExtension): void {
       fetchExtensionEditableRelatedResources: async(cluster: any, relatedResources: EditableRelatedResource[]) => {
         // This extension point is registered for every provisioning cluster, so only contribute
         // to the ones this extension actually provisions
-        console.log('*** evaluating cluster ', cluster?.id, hasCAPAInfrastructure(cluster));
         if (!hasCAPAInfrastructure(cluster)) {
-          console.log('*** skipping non-capa cluster ', cluster?.id);
-
           return relatedResources;
         }
 
@@ -108,14 +179,21 @@ export default function(plugin: IExtension): void {
           fetchInfrastructureCluster(cluster),
         ]);
 
-        const ours = [...machineTemplates, ...infrastructureCluster];
-        const ourIds = new Set(ours.map((entry) => entry.resource?.id).filter(Boolean));
+        // the cluster model adds the machine templates under its own generic group, so ours, with
+        // the CAPA groups, replace them
+        return mergeRelatedResources(relatedResources, [...machineTemplates, ...infrastructureCluster]);
+      }
+    }
+  );
 
-        // Drop anything already contributed for the same resource (the cluster model adds the
-        // machine templates under its own generic group) so ours, with the CAPA groups, wins
-        const existing = relatedResources.filter((entry) => !ourIds.has(entry.resource?.id));
-
-        return [...existing, ...ours];
+  // The identity behind an AWSCluster. The shell matches this against every AWSCluster in the tree,
+  // not only one in the route, so it also applies below a provisioning cluster
+  plugin.addEditableRelatedResources(
+    EditableRelatedResourcesLocation.RESOURCE_YAML,
+    { resource: [AWS_CLUSTER_SCHEMA] },
+    {
+      fetchExtensionEditableRelatedResources: async(awsCluster: any, relatedResources: EditableRelatedResource[]) => {
+        return mergeRelatedResources(relatedResources, await fetchIdentityReference(awsCluster));
       }
     }
   );

@@ -214,6 +214,8 @@ capa:
       machineTemplates: AWS Machine Templates
       infrastructureCluster: AWS Infrastructure Cluster
       identityReference: AWS Identity Reference
+    banners:
+      unsavedMachineTemplate: A new machine template has been created and the provisioning cluster YAML updated to reference it. Save the cluster YAML to apply the changes.
 
 cluster:
   provider:
