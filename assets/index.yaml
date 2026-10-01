@@ -13,8 +13,31 @@ entries:
       catalog.cattle.io/ui-component: plugins
       catalog.cattle.io/ui-extensions-version: '>= 3.0.0 < 4.0.0'
     apiVersion: v2
+    appVersion: 0.0.2-dev2
+    created: "2026-10-01T16:00:42.899496-07:00"
+    description: Provisions and manages Kubernetes clusters on AWS through Cluster
+      API Provider AWS (CAPA)
+    digest: 3c0e75406ad0e075f3a586b5887d5244840d677a02df4e005ecaaf430e22cc03
+    icon: https://raw.githubusercontent.com/rancher/prov-capi-ui-extensions/a8e544492e6ca5b00aa4f019062e4503cf909c3c/pkg/capa/assets/amazoncapa.svg
+    name: capa
+    type: application
+    urls:
+    - assets/capa/capa-0.0.2-dev2.tgz
+    version: 0.0.2-dev2
+  - annotations:
+      catalog.cattle.io/certified: rancher
+      catalog.cattle.io/display-name: SUSE CAPI CAPA UI
+      catalog.cattle.io/experimental: "true"
+      catalog.cattle.io/namespace: cattle-ui-plugin-system
+      catalog.cattle.io/os: linux
+      catalog.cattle.io/permits-os: linux, windows
+      catalog.cattle.io/rancher-version: '>= 2.15.0'
+      catalog.cattle.io/scope: management
+      catalog.cattle.io/ui-component: plugins
+      catalog.cattle.io/ui-extensions-version: '>= 3.0.0 < 4.0.0'
+    apiVersion: v2
     appVersion: 0.0.2-dev1
-    created: "2026-09-29T14:01:07.789478-07:00"
+    created: "2026-10-01T16:00:42.898956-07:00"
     description: Provisions and manages Kubernetes clusters on AWS through Cluster
       API Provider AWS (CAPA)
     digest: e9d93d0181102bb586ebea83ef113e287fd5b8e2255e9fa46a4064c3858d669c
@@ -24,4 +47,4 @@ entries:
     urls:
     - assets/capa/capa-0.0.2-dev1.tgz
     version: 0.0.2-dev1
-generated: "2026-09-29T14:01:07.789206-07:00"
+generated: "2026-10-01T16:00:42.898687-07:00"
