@@ -1,6 +1,12 @@
 import { importTypes } from '@rancher/auto-import';
 import {
-  IExtension, ModelExtensionConstructor, EditableRelatedResourcesLocation, EditableRelatedResource, EditableRelatedResourceSave
+  IExtension,
+  ModelExtensionConstructor,
+  EditableRelatedResourcesLocation,
+  EditableRelatedResource,
+  EditableRelatedResourceContext,
+  EditableRelatedResourceSave,
+  EditableRelatedResourceSaveHook
 } from '@shell/core/types';
 import { hasUnsavedMachinePool, machinePoolStoreFor, saveMachineConfigYaml } from '@shell/utils/machine-pools';
 import { keyForResource } from '@shell/utils/resource-key';
@@ -28,36 +34,84 @@ async function findOrNull(cluster: any, type: string, id: string): Promise<any |
 }
 
 /**
- * Saves an AWS machine template edited as YAML
+ * Asks the user to confirm that saving a machine template replaces it and saves the cluster
+ *
+ * `closeOnClickOutside` is off: GenericPrompt calls `confirm` only from its own buttons, so closing
+ * the modal any other way would leave the save waiting
+ *
+ * @returns false when the user cancels
+ */
+function confirmMachineTemplateReplace(ctx: EditableRelatedResourceContext, context: ReturnType<typeof machinePoolStoreFor>, t: (key: string) => string): Promise<boolean> {
+  const clusterYaml = ctx.editorState.yaml[ctx.primaryNodeId];
+  const clusterModified = clusterYaml !== undefined && clusterYaml !== ctx.initialYaml[ctx.primaryNodeId];
+
+  return new Promise((resolve) => {
+    context.dispatch('management/promptModal', {
+      component:           'GenericPrompt',
+      closeOnClickOutside: false,
+      componentProps:      {
+        title:     t('capa.resourceGraph.replaceMachineTemplate.title'),
+        body:      t(clusterModified ? 'capa.resourceGraph.replaceMachineTemplate.bodyClusterModified' : 'capa.resourceGraph.replaceMachineTemplate.body'),
+        applyMode: 'continue',
+        confirm:   (confirmed: boolean) => resolve(!!confirmed),
+      },
+    });
+  });
+}
+
+/**
+ * The save hooks and `save` of the AWS machine templates edited as YAML
  *
  * As in the cluster form, the template is replaced rather than updated, and the pool in the
- * cluster's YAML is pointed at the replacement. A replacement made by an earlier save is only
- * referenced by the unsaved cluster YAML, so it is removed once replaced again. The template the
- * saved cluster references is kept
+ * cluster's YAML is pointed at the replacement. The user confirms this first, and the cluster is
+ * saved straight after, so it references the replacement
+ *
+ * As in `cleanupMachinePoolConfigs`, a replaced template is removed once the saved cluster no longer
+ * references it. While the cluster save fails, the saved cluster still references it, so it is kept
  */
-function machineTemplateSave(cluster: any): EditableRelatedResourceSave {
-  const context = { ...machinePoolStoreFor(cluster), t: cluster.$rootGetters['i18n/t'] };
-  const createdKeys = new Set<string>();
+function machineTemplateHooks(cluster: any): Pick<EditableRelatedResource, 'beforeSaveHook' | 'save' | 'afterSaveHook'> {
+  const store = machinePoolStoreFor(cluster);
+  const t = cluster.$rootGetters['i18n/t'];
+  const context = { ...store, t };
+  let replaced: any[] = [];
 
-  return async(ctx) => {
+  // show a confirmation modal
+  const beforeSaveHook: EditableRelatedResourceSaveHook = (ctx) => confirmMachineTemplateReplace(ctx, store, t);
+
+  const save: EditableRelatedResourceSave = async(ctx) => {
     const saved = await saveMachineConfigYaml(ctx, context, async(entry, clusterName) => {
       await saveMachinePoolConfigYaml(entry, clusterName, context);
     });
 
-    const replacedKey = keyForResource(ctx.resource);
-    const savedKey = keyForResource(saved);
-
-    if (savedKey !== replacedKey) {
-      if (createdKeys.has(replacedKey)) {
-        await ctx.resource.remove().catch((e: any) => {
-          console.warn('capa: failed to remove replaced machine template', e); // eslint-disable-line no-console
-        });
-      }
-
-      createdKeys.add(savedKey);
+    if (keyForResource(saved) !== keyForResource(ctx.resource)) {
+      replaced.push(ctx.resource);
     }
 
     return saved;
+  };
+
+  // `ctx.resource` is the saved template
+  const afterSaveHook: EditableRelatedResourceSaveHook = async(ctx) => {
+    // false when the template was not modified, so no replacement was created
+    if (!hasUnsavedMachinePool(ctx)) {
+      return;
+    }
+
+    const savedCluster = await ctx.saveResource(ctx.primaryNodeId);
+    const referenced = new Set((savedCluster?.spec?.rkeConfig?.machinePools || []).map((pool: any) => pool.machineConfigRef?.name));
+    const unreferenced = replaced.filter((template) => !referenced.has(template.metadata?.name));
+
+    replaced = replaced.filter((template) => referenced.has(template.metadata?.name));
+
+    for (const template of unreferenced) {
+      await template.remove().catch((e: any) => {
+        console.warn('capa: failed to remove replaced machine template', e); // eslint-disable-line no-console
+      });
+    }
+  };
+
+  return {
+    beforeSaveHook, save, afterSaveHook
   };
 }
 
@@ -78,15 +132,15 @@ async function fetchMachineTemplates(cluster: any): Promise<EditableRelatedResou
     `${ cluster.metadata?.namespace }/${ name }`
   )));
 
-  const save = machineTemplateSave(cluster);
+  const hooks = machineTemplateHooks(cluster);
 
   return templates
     .filter((template) => !!template)
     .map((resource) => ({
       resource,
       groupKey: MACHINE_TEMPLATE_GROUP,
-      save,
-      // a save creates a replacement template, which only the unsaved cluster yaml references
+      ...hooks,
+      // the replacement template is referenced only by the unsaved cluster yaml when the cluster save failed
       banner:   (ctx) => (hasUnsavedMachinePool(ctx) ? { color: 'error', labelKey: 'capa.resourceGraph.banners.unsavedMachineTemplate' } : null),
     }));
 }
